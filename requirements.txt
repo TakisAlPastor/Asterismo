@@ -1,0 +1,22 @@
+# GUI Framework
+PySide6>=6.8.0
+
+# Asynchronous HTTP & Cloud Recognition Clients
+httpx>=0.28.0
+shazamio>=0.8.0
+
+# Media Harvesting & Anti-Bot Impersonation
+yt-dlp>=2026.01.01
+curl_cffi>=0.7.0
+
+# Scientific & Acoustic Landmark Fingerprinting (audfprint)
+numpy>=2.0.0
+scipy>=1.14.0
+joblib>=1.4.0
+docopt>=0.6.2
+psutil>=6.0.0
+audioop-lts>=0.2.1; python_version >= '3.13'
+
+# Testing Suite (Development & CI)
+pytest>=8.3.0
+pytest-cov>=6.0.0
