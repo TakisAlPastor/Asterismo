@@ -37,6 +37,10 @@ SQLITE_TEMP_STORE: str = "MEMORY"
 SQLITE_BUSY_TIMEOUT_MS: int = 5000
 SQLITE_CACHE_SIZE_KB: int = -64000  # 64 MB
 SQLITE_FOREIGN_KEYS_ON: int = 1
+MEMORY_DB_TARGET: str = ":memory:"
+APP_SETTINGS_ROW_KEY: str = "global_app_settings"
+MIGRATION_V1_VERSION: int = 1
+MIGRATION_V1_NAME: str = "001_initial_app_settings"
 
 # Subprocess runner tokens (Windows & general)
 WIN32_CREATE_NO_WINDOW: int = 0x08000000

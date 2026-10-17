@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from src.core.config.constants import (
     APP_NAME,
+    APP_SETTINGS_ROW_KEY,
     APP_VERSION,
     BIN_DIRNAME,
     BIN_STAGING_DIRNAME,
@@ -18,6 +19,9 @@ from src.core.config.constants import (
     DEFAULT_SPLIT_THRESHOLD_SECONDS,
     DEFAULT_SUBPROCESS_TIMEOUT_SEC,
     ENCODING_ERROR_POLICY,
+    MEMORY_DB_TARGET,
+    MIGRATION_V1_NAME,
+    MIGRATION_V1_VERSION,
     MIN_POSITIVE_INT,
     MIN_PYTHON_VERSION,
     REDACTED_SECRET_PLACEHOLDER,
@@ -47,6 +51,7 @@ from src.core.config.secrets_store import SecretsStore
 
 __all__ = [
     "APP_NAME",
+    "APP_SETTINGS_ROW_KEY",
     "APP_VERSION",
     "AppSettings",
     "BIN_DIRNAME",
@@ -65,6 +70,9 @@ __all__ = [
     "DEFAULT_SUBPROCESS_TIMEOUT_SEC",
     "DependencyState",
     "ENCODING_ERROR_POLICY",
+    "MEMORY_DB_TARGET",
+    "MIGRATION_V1_NAME",
+    "MIGRATION_V1_VERSION",
     "MIN_POSITIVE_INT",
     "MIN_PYTHON_VERSION",
     "REDACTED_SECRET_PLACEHOLDER",
