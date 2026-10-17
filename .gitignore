@@ -59,11 +59,15 @@ env.bak/
 venv.bak/
 
 # Local databases, temporary workspaces, and downloaded media
+.secrets.json
+.secrets.json.tmp
 asterismo_state.db
 asterismo_state.db-wal
 asterismo_state.db-shm
+*.db
 *.db-wal
 *.db-shm
+bin/.staging/
 downloads/
 temp/
 output/

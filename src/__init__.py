@@ -1,0 +1,1 @@
+"""Asterismo root package."""
