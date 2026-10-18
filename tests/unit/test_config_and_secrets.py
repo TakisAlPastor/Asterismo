@@ -53,8 +53,9 @@ def test_app_settings_default_and_roundtrip(tmp_path: Path) -> None:
     restored = AppSettings.from_dict(payload, base_dir=base_dir)
 
     # Assert
-    assert settings.theme == ThemeMode.DARK
+    assert settings.theme == ThemeMode.SYSTEM
     assert settings.scan_mode == ScanMode.QUICK
+
     assert settings.split_threshold_seconds == DEFAULT_SPLIT_THRESHOLD_SECONDS
     assert settings.split_segment_seconds == DEFAULT_SPLIT_SEGMENT_SECONDS
     assert settings.max_concurrent_downloads == DEFAULT_MAX_CONCURRENT_DOWNLOADS

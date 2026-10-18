@@ -117,7 +117,7 @@ class AppSettings:
     """Portable application configuration stored in SQLite state store."""
 
     paths: WorkspacePaths
-    theme: ThemeMode = ThemeMode.DARK
+    theme: ThemeMode = ThemeMode.SYSTEM
     scan_mode: ScanMode = ScanMode.QUICK
     split_long_audio: bool = DEFAULT_SPLIT_LONG_AUDIO
     split_threshold_seconds: int = DEFAULT_SPLIT_THRESHOLD_SECONDS
