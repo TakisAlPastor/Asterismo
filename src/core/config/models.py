@@ -52,6 +52,22 @@ class DependencyState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class DependencyStatus:
+    """Detailed health check status of an external dependency or tool."""
+
+    name: str
+    state: DependencyState
+    path: Path | None = None
+    version: str | None = None
+    details: str = ""
+
+    @property
+    def is_ok(self) -> bool:
+        """Convenience check if dependency is operational."""
+        return self.state == DependencyState.OK
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspacePaths:
     """Explicit filesystem paths used across Asterismo services."""
 

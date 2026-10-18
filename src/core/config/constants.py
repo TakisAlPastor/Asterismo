@@ -48,3 +48,48 @@ WIN32_SW_HIDE: int = 0
 DEFAULT_SUBPROCESS_TIMEOUT_SEC: float = 60.0
 UTF8_ENCODING: str = "utf-8"
 ENCODING_ERROR_POLICY: str = "replace"
+
+# External Binary & Dependency Names
+DEP_KEY_FFMPEG: str = "ffmpeg"
+DEP_KEY_FFPROBE: str = "ffprobe"
+DEP_KEY_FPCALC: str = "fpcalc"
+DEP_KEY_AUDFPRINT: str = "audfprint"
+DEP_KEY_PYTHON: str = "python"
+DEP_KEY_WINGET: str = "winget"
+
+BIN_NAME_FFMPEG: str = "ffmpeg.exe"
+BIN_NAME_FFPROBE: str = "ffprobe.exe"
+BIN_NAME_FPCALC: str = "fpcalc.exe"
+BIN_NAME_WINGET: str = "winget.exe"
+
+# Required Python Packages for Doctor Verification
+REQUIRED_PYTHON_PACKAGES: tuple[str, ...] = (
+    "PySide6",
+    "numpy",
+    "scipy",
+    "joblib",
+    "httpx",
+    "yt_dlp",
+    "curl_cffi",
+)
+
+# Vendored audfprint integrity requirements
+AUDFPRINT_REQUIRED_FILES: tuple[str, ...] = (
+    "__init__.py",
+    "audfprint.py",
+    "audfprint_analyze.py",
+    "audfprint_match.py",
+    "audio_read.py",
+    "hash_table.py",
+    "stft.py",
+)
+
+AUDFPRINT_INTEGRITY_MARKERS: dict[str, str] = {
+    "audfprint.py": 'reconfigure(encoding="utf-8")',
+    "audio_read.py": "-vn",
+    "hash_table.py": "_NumpyCoreCompatUnpickler",
+}
+
+# Winget Package IDs for anti-AV provisioning
+WINGET_FFMPEG_PACKAGE_ID: str = "Gyan.FFmpeg"
+WINGET_CHROMAPRINT_PACKAGE_ID: str = "AcoustID.Chromaprint"
