@@ -159,7 +159,7 @@ class DependencyDoctorService:
         try:
             result = self._runner.run(
                 [sys.executable, str(audfprint_py), "--version"],
-                timeout=10.0,
+                timeout=25.0,
             )
             # audfprint --version prints version or docopt string
             ver_text = (result.stdout or result.stderr).strip()
