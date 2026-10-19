@@ -10,6 +10,8 @@ import sqlite3
 from src.core.config.constants import (
     MIGRATION_V1_NAME,
     MIGRATION_V1_VERSION,
+    MIGRATION_V2_NAME,
+    MIGRATION_V2_VERSION,
 )
 from src.core.database.connection import DatabaseError, DatabaseManager
 
@@ -40,6 +42,72 @@ MIGRATION_V1 = Migration(
     """,
 )
 
+# V2: Harvester queue, items deduplication, and pklz catalog
+MIGRATION_V2 = Migration(
+    version=MIGRATION_V2_VERSION,
+    name=MIGRATION_V2_NAME,
+    up_sql="""
+    CREATE TABLE IF NOT EXISTS harvest_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_url TEXT NOT NULL,
+        normalized_url TEXT NOT NULL UNIQUE,
+        source_type TEXT NOT NULL,
+        prefix_label TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        total_items INTEGER NOT NULL DEFAULT 0,
+        completed_items INTEGER NOT NULL DEFAULT 0,
+        skipped_items INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_harvest_queue_status ON harvest_queue(status);
+
+    CREATE TABLE IF NOT EXISTS harvest_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL,
+        item_key TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL DEFAULT '',
+        source_url TEXT NOT NULL DEFAULT '',
+        duration_seconds REAL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        pklz_filename TEXT NOT NULL DEFAULT '',
+        fingerprinted_at TEXT,
+        FOREIGN KEY (task_id) REFERENCES harvest_queue(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_harvest_items_task_status ON harvest_items(task_id, status);
+
+    CREATE TABLE IF NOT EXISTS pklz_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL UNIQUE,
+        file_name TEXT NOT NULL,
+        prefix_label TEXT NOT NULL,
+        batch_index INTEGER NOT NULL DEFAULT 1,
+        track_count INTEGER NOT NULL DEFAULT 0,
+        total_hashes INTEGER NOT NULL DEFAULT 0,
+        file_size_bytes INTEGER NOT NULL DEFAULT 0,
+        sha256_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pklz_catalog_prefix ON pklz_catalog(prefix_label);
+    """,
+    down_sql="""
+    DROP INDEX IF EXISTS idx_pklz_catalog_prefix;
+    DROP TABLE IF EXISTS pklz_catalog;
+    DROP INDEX IF EXISTS idx_harvest_items_task_status;
+    DROP TABLE IF EXISTS harvest_items;
+    DROP INDEX IF EXISTS idx_harvest_queue_status;
+    DROP TABLE IF EXISTS harvest_queue;
+    """,
+)
+
+ALL_MIGRATIONS: tuple[Migration, ...] = (MIGRATION_V1, MIGRATION_V2)
+
 
 class MigrationManager:
     """Executes schema migrations in transactional sequence."""
@@ -47,7 +115,7 @@ class MigrationManager:
     def __init__(
         self,
         db: DatabaseManager,
-        migrations: tuple[Migration, ...] = (MIGRATION_V1,),
+        migrations: tuple[Migration, ...] = ALL_MIGRATIONS,
     ) -> None:
         self._db = db
         # Sort migrations ascending by version

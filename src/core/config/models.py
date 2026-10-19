@@ -42,6 +42,46 @@ class ScanMode(StrEnum):
     BOTH = "both"
 
 
+class HarvestTaskStatus(StrEnum):
+    """Lifecycle status of a harvest job in the queue."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    STOPPED = "stopped"
+
+
+class HarvestSourceType(StrEnum):
+    """Source classification of audio input for harvesting."""
+
+    YTDLP_URL = "ytdlp_url"
+    WEB_DIRECTORY = "web_directory"
+    LOCAL_DISK = "local_disk"
+
+
+class HarvestItemStatus(StrEnum):
+    """Processing status of an individual audio track within a harvest task."""
+
+    PENDING = "pending"
+    DOWNLOADED = "downloaded"
+    FINGERPRINTED = "fingerprinted"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class BrowserCookieSource(StrEnum):
+    """Supported browsers for cookie extraction in yt-dlp."""
+
+    NONE = "none"
+    FIREFOX = "firefox"
+    CHROME = "chrome"
+    EDGE = "edge"
+    BRAVE = "brave"
+
+
 class DependencyState(StrEnum):
     """State of an external binary or package dependency."""
 
@@ -125,6 +165,9 @@ class AppSettings:
     max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS
     fp_worker_count: int = DEFAULT_FP_WORKER_COUNT
     keep_downloaded_audio: bool = False
+    cookies_browser: BrowserCookieSource = BrowserCookieSource.NONE
+    skip_already_fingerprinted: bool = True
+    extra_ytdlp_args: str = ""
 
     def __post_init__(self) -> None:
         """Validate bounds and coerce string enums safely."""
@@ -141,6 +184,14 @@ class AppSettings:
             except ValueError as err:
                 raise ConfigurationError(
                     f"Invalid scan mode: {self.scan_mode}") from err
+
+        if not isinstance(self.cookies_browser, BrowserCookieSource):
+            try:
+                self.cookies_browser = BrowserCookieSource(
+                    str(self.cookies_browser).lower())
+            except ValueError as err:
+                raise ConfigurationError(
+                    f"Invalid browser cookie source: {self.cookies_browser}") from err
 
         if self.split_threshold_seconds < MIN_POSITIVE_INT:
             raise ConfigurationError(
@@ -185,6 +236,9 @@ class AppSettings:
             "max_concurrent_downloads": self.max_concurrent_downloads,
             "fp_worker_count": self.fp_worker_count,
             "keep_downloaded_audio": self.keep_downloaded_audio,
+            "cookies_browser": str(self.cookies_browser.value),
+            "skip_already_fingerprinted": self.skip_already_fingerprinted,
+            "extra_ytdlp_args": self.extra_ytdlp_args,
         }
 
     @classmethod
@@ -213,6 +267,12 @@ class AppSettings:
                 data.get("fp_worker_count", defaults.fp_worker_count)),
             keep_downloaded_audio=bool(
                 data.get("keep_downloaded_audio", defaults.keep_downloaded_audio)),
+            cookies_browser=data.get(
+                "cookies_browser", defaults.cookies_browser),
+            skip_already_fingerprinted=bool(
+                data.get("skip_already_fingerprinted", defaults.skip_already_fingerprinted)),
+            extra_ytdlp_args=str(
+                data.get("extra_ytdlp_args", defaults.extra_ytdlp_args)),
         )
 
 
@@ -277,3 +337,105 @@ class SecretCredentials:
     def __str__(self) -> str:
         """Same masking behavior for string conversion."""
         return self.__repr__()
+
+
+@dataclass(frozen=True, slots=True)
+class HarvestTask:
+    """Representation of an audio ingestion job in the harvest queue."""
+
+    id: int | None
+    raw_url: str
+    normalized_url: str
+    source_type: HarvestSourceType
+    prefix_label: str
+    title: str = ""
+    status: HarvestTaskStatus = HarvestTaskStatus.PENDING
+    total_items: int = 0
+    completed_items: int = 0
+    skipped_items: int = 0
+    error_message: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+    def __post_init__(self) -> None:
+        """Validate URLs and bounds."""
+        if not self.raw_url.strip():
+            raise ConfigurationError("raw_url cannot be empty")
+        if not self.normalized_url.strip():
+            raise ConfigurationError("normalized_url cannot be empty")
+        if not self.prefix_label.strip():
+            raise ConfigurationError("prefix_label cannot be empty")
+        if self.total_items < 0:
+            raise ConfigurationError(
+                f"total_items must be >= 0, got {self.total_items}")
+        if self.completed_items < 0:
+            raise ConfigurationError(
+                f"completed_items must be >= 0, got {self.completed_items}")
+        if self.skipped_items < 0:
+            raise ConfigurationError(
+                f"skipped_items must be >= 0, got {self.skipped_items}")
+
+
+@dataclass(frozen=True, slots=True)
+class HarvestItemRecord:
+    """Representation of an individual audio item tracked under a harvest task."""
+
+    id: int | None
+    task_id: int
+    item_key: str
+    title: str = ""
+    source_url: str = ""
+    duration_seconds: float | None = None
+    status: HarvestItemStatus = HarvestItemStatus.PENDING
+    pklz_filename: str = ""
+    fingerprinted_at: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate item key and task reference."""
+        if not self.item_key.strip():
+            raise ConfigurationError("item_key cannot be empty")
+        if self.task_id < 1:
+            raise ConfigurationError(
+                f"task_id must be >= 1, got {self.task_id}")
+        if self.duration_seconds is not None and self.duration_seconds < 0:
+            raise ConfigurationError(
+                f"duration_seconds must be >= 0, got {self.duration_seconds}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PklzCatalogEntry:
+    """Indexed metadata for an acoustic landmark .pklz database file."""
+
+    file_path: Path
+    file_name: str
+    prefix_label: str
+    batch_index: int = 1
+    track_count: int = 0
+    total_hashes: int = 0
+    file_size_bytes: int = 0
+    sha256_hash: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate positive counts and hash string."""
+        if not str(self.file_path).strip():
+            raise ConfigurationError("file_path cannot be empty")
+        if not self.file_name.strip():
+            raise ConfigurationError("file_name cannot be empty")
+        if not self.prefix_label.strip():
+            raise ConfigurationError("prefix_label cannot be empty")
+        if self.batch_index < 1:
+            raise ConfigurationError(
+                f"batch_index must be >= 1, got {self.batch_index}")
+        if self.track_count < 0:
+            raise ConfigurationError(
+                f"track_count must be >= 0, got {self.track_count}")
+        if self.total_hashes < 0:
+            raise ConfigurationError(
+                f"total_hashes must be >= 0, got {self.total_hashes}")
+        if self.file_size_bytes < 0:
+            raise ConfigurationError(
+                f"file_size_bytes must be >= 0, got {self.file_size_bytes}")

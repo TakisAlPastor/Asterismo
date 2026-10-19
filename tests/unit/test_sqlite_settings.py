@@ -1,6 +1,7 @@
 """Unit tests for SQLite WAL connection, migrations, and SettingsRepository."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 from pathlib import Path
 import pytest
@@ -26,7 +27,7 @@ from src.core.database.settings_repository import SettingsRepository
 
 
 @pytest.fixture
-def in_memory_db() -> DatabaseManager:
+def in_memory_db() -> Iterator[DatabaseManager]:
     """Fixture providing an active in-memory DatabaseManager."""
     db = DatabaseManager(MEMORY_DB_TARGET)
     yield db
@@ -55,7 +56,7 @@ def test_database_manager_enforces_wal_and_foreign_keys(tmp_path: Path) -> None:
 def test_migration_manager_apply_and_rollback_v1(in_memory_db: DatabaseManager) -> None:
     """Verify applying V1 migration creates tables and rollback properly destroys them."""
     # Arrange
-    manager = MigrationManager(in_memory_db)
+    manager = MigrationManager(in_memory_db, migrations=(MIGRATION_V1,))
 
     # Act 1: Initial state
     assert manager.current_version() == 0
@@ -88,7 +89,7 @@ def test_migration_manager_apply_and_rollback_v1(in_memory_db: DatabaseManager) 
 def test_migration_manager_is_idempotent(in_memory_db: DatabaseManager) -> None:
     """Verify subsequent calls to apply_all() do not re-apply existing migrations."""
     # Arrange
-    manager = MigrationManager(in_memory_db)
+    manager = MigrationManager(in_memory_db, migrations=(MIGRATION_V1,))
 
     # Act
     assert manager.apply_all() == 1

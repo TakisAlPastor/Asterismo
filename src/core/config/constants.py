@@ -41,6 +41,67 @@ MEMORY_DB_TARGET: str = ":memory:"
 APP_SETTINGS_ROW_KEY: str = "global_app_settings"
 MIGRATION_V1_VERSION: int = 1
 MIGRATION_V1_NAME: str = "001_initial_app_settings"
+MIGRATION_V2_VERSION: int = 2
+MIGRATION_V2_NAME: str = "002_milestone2_harvester_and_catalog"
+
+# Harvester & Web Crawler Constants
+MAX_QUEUE_LINKS: int = 1000
+WEB_CRAWLER_MAX_DEPTH: int = 25
+WEB_CRAWLER_MAX_FOLDERS: int = 5000
+BACKOFF_INITIAL_SECONDS: float = 30.0
+BACKOFF_MAX_SECONDS: float = 600.0
+BACKOFF_MULTIPLIER: float = 2.0
+SUPPORTED_AUDIO_EXTENSIONS: tuple[str, ...] = (
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".flac",
+    ".m4a",
+    ".wma",
+    ".webm",
+    ".ogg",
+    ".aac",
+    ".opus",
+)
+TRACKING_QUERY_PARAMS: frozenset[str] = frozenset({
+    "si",
+    "pp",
+    "feature",
+    "fbclid",
+    "gclid",
+    "igshid",
+    "ref_src",
+    "ref_url",
+})
+TRACKING_QUERY_PREFIX: str = "utm_"
+
+# Audio Splitter & .pklz Builder Constants
+PART_FILE_SUFFIX: str = ".part"
+PKLZ_EXTENSION: str = ".pklz"
+PKLZ_TEMP_SUFFIX: str = ".pklz.tmp"
+SPLIT_MUXER_MAP: dict[str, str] = {
+    ".m4a": "ipod",
+    ".mp4": "mp4",
+    ".mp3": "mp3",
+    ".flac": "flac",
+    ".wav": "wav",
+    ".ogg": "ogg",
+    ".opus": "opus",
+    ".aac": "adts",
+    ".webm": "webm",
+    ".wma": "asf",
+}
+AUDFPRINT_DEFAULT_DENSITY: float = 20.0
+AUDFPRINT_DEFAULT_HASHBITS: int = 20
+AUDFPRINT_DEFAULT_BUCKETSIZE: int = 100
+AUDFPRINT_DEFAULT_MAXTIME: int = 16384
+AUDFPRINT_DEFAULT_SAMPLERATE: int = 11025
+AUDFPRINT_DEFAULT_SHIFTS: int = 1
+AUDFPRINT_DEFAULT_FANOUT: int = 3
+AUDFPRINT_DEFAULT_PKS_PER_FRAME: int = 5
+AUDFPRINT_DEFAULT_FREQ_SD: float = 30.0
+AUDFPRINT_MIN_FILES_FOR_MULTIPART: int = 16
+AUDFPRINT_MIN_FILES_PER_PART: int = 8
 
 # Subprocess runner tokens (Windows & general)
 WIN32_CREATE_NO_WINDOW: int = 0x08000000
