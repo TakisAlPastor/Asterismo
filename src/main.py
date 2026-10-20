@@ -11,8 +11,14 @@ from src.core.config.models import WorkspacePaths
 
 from src.core.config.secrets_store import SecretsStore
 from src.core.database.connection import DatabaseManager
+from src.core.database.harvest_repository import HarvestRepository
+from src.core.database.catalog_repository import CatalogRepository
 from src.core.database.migrations import MigrationManager
 from src.core.database.settings_repository import SettingsRepository
+from src.core.fingerprinter.builder import FingerprintBuilderService
+from src.core.harvester.audio_splitter import AudioSplitterService
+from src.core.harvester.service import HarvesterService
+from src.core.harvester.web_crawler import WebDirectoryCrawler
 from src.core.process.binary_locator import BinaryLocator
 from src.core.process.dependency_doctor import DependencyDoctorService
 from src.core.process.runner import SilentProcessRunner
@@ -30,7 +36,7 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
     for p in (paths.input_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir):
         p.mkdir(parents=True, exist_ok=True)
 
-    # 2. Initialize Database and run V1 migrations
+    # 2. Initialize Database and run migrations (V1, V2)
     db_file = paths.db_dir / STATE_DB_FILENAME
     db_manager = DatabaseManager(db_file)
     migration_manager = MigrationManager(db_manager)
@@ -38,6 +44,8 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
 
     # 3. Instantiate repositories and services
     settings_repo = SettingsRepository(db=db_manager, base_dir=base_dir)
+    harvest_repo = HarvestRepository(db=db_manager)
+    catalog_repo = CatalogRepository(db=db_manager)
     secrets_store = SecretsStore(base_dir / SECRETS_FILENAME)
     app_settings = settings_repo.load()
 
@@ -46,6 +54,26 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
     doctor_service = DependencyDoctorService(
         binary_locator=binary_locator,
         process_runner=process_runner,
+    )
+
+    audio_splitter = AudioSplitterService(
+        runner=process_runner,
+        locator=binary_locator,
+    )
+    builder_service = FingerprintBuilderService(
+        runner=process_runner,
+        locator=binary_locator,
+        catalog_repo=catalog_repo,
+    )
+    web_crawler = WebDirectoryCrawler()
+
+    harvester_service = HarvesterService(
+        harvest_repo=harvest_repo,
+        catalog_repo=catalog_repo,
+        settings_repo=settings_repo,
+        splitter=audio_splitter,
+        builder=builder_service,
+        crawler=web_crawler,
     )
 
     # 4. Initialize Qt Application
@@ -62,6 +90,7 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         secrets_store=secrets_store,
         doctor_service=doctor_service,
         process_runner=process_runner,
+        harvester_service=harvester_service,
     )
 
     return app, window

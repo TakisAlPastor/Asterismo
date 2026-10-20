@@ -34,7 +34,9 @@ from src.ui.theme import (
     WINDOW_MIN_WIDTH,
     build_stylesheet,
 )
+from src.ui.views.harvester_view import HarvesterView
 from src.ui.views.settings_view import SettingsView
+from src.core.harvester.service import HarvesterService
 
 
 class MainWindow(QMainWindow):
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         secrets_store: SecretsStore,
         doctor_service: DependencyDoctorService,
         process_runner: SilentProcessRunner,
+        harvester_service: HarvesterService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -55,6 +58,7 @@ class MainWindow(QMainWindow):
         self._secrets_store = secrets_store
         self._doctor_service = doctor_service
         self._process_runner = process_runner
+        self._harvester_service = harvester_service
 
         self._init_window()
         self._init_layout()
@@ -93,11 +97,22 @@ class MainWindow(QMainWindow):
         # Stacked Views Container
         self._view_stack = QStackedWidget(content_splitter)
 
-        # Placeholders for upcoming milestones
-        self._harvester_placeholder = self._create_placeholder(
-            "Media Harvester (Milestone 2)",
-            "Batch YouTube/SoundCloud audio ingestion, directory crawling, and audio splitting.",
-        )
+        # Milestone 2 Harvester View (or placeholder fallback if service not wired)
+        if self._harvester_service is not None:
+            self._harvester_view = HarvesterView(
+                harvester_service=self._harvester_service,
+                settings_repo=self._settings_repo,
+                parent=self._view_stack,
+            )
+            self._view_stack.addWidget(self._harvester_view)
+        else:
+            self._harvester_view = None
+            self._harvester_placeholder = self._create_placeholder(
+                "Media Harvester (Milestone 2)",
+                "Batch YouTube/SoundCloud audio ingestion, directory crawling, and audio splitting.",
+            )
+            self._view_stack.addWidget(self._harvester_placeholder)
+
         self._catalog_placeholder = self._create_placeholder(
             "Database Catalog (Milestone 3)",
             "Searchable .pklz fingerprint database inspection and subset selection.",
@@ -116,7 +131,6 @@ class MainWindow(QMainWindow):
             parent=self._view_stack,
         )
 
-        self._view_stack.addWidget(self._harvester_placeholder)
         self._view_stack.addWidget(self._catalog_placeholder)
         self._view_stack.addWidget(self._scanner_placeholder)
         self._view_stack.addWidget(self._settings_view)
@@ -167,9 +181,16 @@ class MainWindow(QMainWindow):
         self._settings_view.settings_saved.connect(self.on_settings_saved)
         self._settings_view.log_requested.connect(self._log_console.append_log)
 
-        # Set initial view to Settings (index 3) and synchronize view stack
-        self._sidebar.setCurrentRow(3)
-        self._view_stack.setCurrentIndex(3)
+        if self._harvester_view is not None:
+            self._harvester_view.log_requested.connect(
+                self._log_console.append_log)
+            # Default to Media Harvester (index 0) when available
+            self._sidebar.setCurrentRow(0)
+            self._view_stack.setCurrentIndex(0)
+        else:
+            # Set initial view to Settings (index 3) and synchronize view stack
+            self._sidebar.setCurrentRow(3)
+            self._view_stack.setCurrentIndex(3)
 
         # Log initial startup
         self._log_console.append_log(f"{APP_NAME} desktop shell initialized.")
@@ -192,6 +213,10 @@ class MainWindow(QMainWindow):
     @property
     def log_console(self) -> LogConsole:
         return self._log_console
+
+    @property
+    def harvester_view(self) -> HarvesterView | None:
+        return self._harvester_view
 
     @property
     def settings_view(self) -> SettingsView:

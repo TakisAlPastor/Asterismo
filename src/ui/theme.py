@@ -275,4 +275,41 @@ def build_stylesheet(theme: ThemeMode) -> str:
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
     }}
+
+    QTableWidget {{
+        background-color: {pal.bg_surface};
+        border: 1px solid {pal.border};
+        border-radius: {CARD_BORDER_RADIUS}px;
+        gridline-color: {pal.border};
+        color: {pal.text_primary};
+        selection-background-color: {pal.bg_surface_alt};
+        selection-color: {pal.text_primary};
+    }}
+
+    QHeaderView::section {{
+        background-color: {pal.bg_sidebar};
+        color: {pal.text_secondary};
+        font-weight: 600;
+        font-size: {FONT_SIZE_SMALL}px;
+        border: none;
+        border-bottom: 1px solid {pal.border};
+        border-right: 1px solid {pal.border};
+        padding: 6px 8px;
+    }}
+
+    QProgressBar {{
+        background-color: {pal.bg_surface_alt};
+        border: 1px solid {pal.border};
+        border-radius: {INPUT_BORDER_RADIUS}px;
+        text-align: center;
+        font-size: {FONT_SIZE_SMALL}px;
+        font-weight: 600;
+        color: {pal.text_primary};
+        height: 18px;
+    }}
+
+    QProgressBar::chunk {{
+        background-color: {pal.accent};
+        border-radius: {INPUT_BORDER_RADIUS - 1}px;
+    }}
     """

@@ -10,6 +10,11 @@ from src.core.harvester.audio_splitter import (
     compute_split_segments,
     format_split_piece_name,
 )
+from src.core.harvester.service import (
+    HarvesterCallbacks,
+    HarvesterService,
+    HarvestRunSummary,
+)
 from src.core.harvester.url_utils import (
     classify_url,
     clean_tracking_params,
@@ -38,6 +43,9 @@ __all__ = [
     "AudioSplitterCancelledError",
     "AudioSplitterError",
     "AudioSplitterService",
+    "HarvesterCallbacks",
+    "HarvesterService",
+    "HarvestRunSummary",
     "WebCrawlerCancelledError",
     "WebCrawlerError",
     "WebCrawlerListingResult",

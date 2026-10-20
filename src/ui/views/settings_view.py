@@ -72,7 +72,6 @@ class SettingsView(QWidget):
         self._init_ui()
         self.load_data()
 
-
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(
@@ -135,7 +134,8 @@ class SettingsView(QWidget):
         diag_layout.addWidget(diag_desc)
 
         diag_actions = QHBoxLayout()
-        self._open_doctor_btn = QPushButton("Open Dependency Doctor...", diag_card)
+        self._open_doctor_btn = QPushButton(
+            "Open Dependency Doctor...", diag_card)
         self._open_doctor_btn.clicked.connect(self.open_dependency_doctor)
         diag_actions.addWidget(self._open_doctor_btn)
         diag_actions.addStretch()
@@ -147,7 +147,6 @@ class SettingsView(QWidget):
         opts_card = QFrame(container)
         opts_card.setProperty("class", "card")
         opts_layout = QVBoxLayout(opts_card)
-
 
         opts_title = QLabel("Pipeline & Appearance", opts_card)
         opts_title.setProperty("class", "header")
@@ -307,6 +306,7 @@ class SettingsView(QWidget):
     @Slot()
     def save_data(self) -> None:
         """Collect form values, validate, and persist to SQLite and .secrets.json."""
+        current = self._settings_repo.load()
         paths = WorkspacePaths(
             input_dir=Path(self._input_dir_edit.text().strip()),
             db_dir=Path(self._db_dir_edit.text().strip()),
@@ -325,6 +325,9 @@ class SettingsView(QWidget):
             max_concurrent_downloads=self._downloads_spin.value(),
             fp_worker_count=self._workers_spin.value(),
             keep_downloaded_audio=self._keep_audio_cb.isChecked(),
+            cookies_browser=current.cookies_browser,
+            skip_already_fingerprinted=current.skip_already_fingerprinted,
+            extra_ytdlp_args=current.extra_ytdlp_args,
         )
 
         secrets = SecretCredentials(
@@ -364,11 +367,11 @@ class SettingsView(QWidget):
     def open_dependency_doctor(self) -> None:
         """Open the modal DependencyDoctorDialog on demand."""
         if self._doctor_service is None:
-            self.log_requested.emit("Dependency Doctor service is unavailable.")
+            self.log_requested.emit(
+                "Dependency Doctor service is unavailable.")
             return
 
         from src.ui.views.dependency_doctor_view import DependencyDoctorDialog
         dialog = DependencyDoctorDialog(self._doctor_service, self)
         dialog.doctor_view.log_requested.connect(self.log_requested)
         dialog.exec()
-

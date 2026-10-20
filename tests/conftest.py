@@ -1,11 +1,16 @@
-"""Root pytest configuration ensuring project root is in sys.path."""
-
+"""Pytest fixtures for UI and core integration tests."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import os
+from PySide6.QtWidgets import QApplication
+import pytest
 
-# Add project root directory to sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+
+@pytest.fixture(scope="session")
+def qapp() -> QApplication:
+    """Session-level offscreen QApplication fixture for headless UI testing."""
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
