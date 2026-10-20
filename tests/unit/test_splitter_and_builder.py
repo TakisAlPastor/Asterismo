@@ -213,6 +213,51 @@ def test_process_directory_skips_probing_when_disabled(tmp_path: Path) -> None:
     mock_runner.run.assert_not_called()
 
 
+def test_probe_durations_parallel(tmp_path: Path) -> None:
+    mock_runner = MagicMock(spec=SilentProcessRunner)
+    mock_locator = MagicMock(spec=BinaryLocator)
+    mock_locator.locate.return_value = Path("C:/tools/ffprobe.exe")
+
+    file1 = tmp_path / "track1.mp3"
+    file2 = tmp_path / "track2.wav"
+    file3 = tmp_path / "bad.mp3"
+
+    def _fake_run(cmd: list[str], **kwargs: object) -> ProcessResult:
+        path_str = cmd[-1]
+        if "track1" in path_str:
+            return ProcessResult(0, "120.5\n", "", tuple(cmd))
+        if "track2" in path_str:
+            return ProcessResult(0, "340.0\n", "", tuple(cmd))
+        return ProcessResult(1, "", "corrupt file", tuple(cmd))
+
+    mock_runner.run.side_effect = _fake_run
+
+    service = AudioSplitterService(runner=mock_runner, locator=mock_locator)
+    durations = service.probe_durations_parallel(
+        [file1, file2, file3], worker_count=3)
+
+    assert len(durations) == 3
+    assert durations[file1] == pytest.approx(120.5)
+    assert durations[file2] == pytest.approx(340.0)
+    assert durations[file3] is None
+
+
+def test_probe_durations_parallel_cancelled(tmp_path: Path) -> None:
+    mock_runner = MagicMock(spec=SilentProcessRunner)
+    mock_locator = MagicMock(spec=BinaryLocator)
+    mock_locator.locate.return_value = Path("C:/tools/ffprobe.exe")
+
+    service = AudioSplitterService(runner=mock_runner, locator=mock_locator)
+    cancel_evt = threading.Event()
+    cancel_evt.set()
+
+    with pytest.raises(AudioSplitterCancelledError):
+        service.probe_durations_parallel(
+            [tmp_path / "f1.mp3", tmp_path / "f2.mp3"],
+            cancel_event=cancel_evt,
+        )
+
+
 # ==============================================================================
 # Fingerprint Builder Service Tests
 # ==============================================================================

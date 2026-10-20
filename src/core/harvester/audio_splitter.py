@@ -4,12 +4,14 @@ from __future__ import annotations
 import logging
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
 import threading
 
 from src.core.config.constants import (
+    DEFAULT_PROBE_WORKER_COUNT,
     DEFAULT_SPLIT_SEGMENT_SECONDS,
     DEFAULT_SPLIT_THRESHOLD_SECONDS,
     DEP_KEY_FFMPEG,
@@ -147,6 +149,38 @@ class AudioSplitterService:
         except (ValueError, Exception) as exc:
             logger.debug("Failed probing duration for %s: %s", file_path, exc)
             return None
+
+    def probe_durations_parallel(
+        self,
+        files: Sequence[Path],
+        worker_count: int = DEFAULT_PROBE_WORKER_COUNT,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[Path, float | None]:
+        """Probe audio durations for multiple files in parallel using ffprobe."""
+        if not files:
+            return {}
+
+        effective_workers = max(1, min(len(files), worker_count))
+        results: dict[Path, float | None] = {}
+
+        with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+            future_to_file = {
+                pool.submit(self.probe_duration, f): f for f in files
+            }
+            for future in as_completed(future_to_file):
+                if cancel_event is not None and cancel_event.is_set():
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    raise AudioSplitterCancelledError(
+                        "Parallel duration probing cancelled.")
+                file_path = future_to_file[future]
+                try:
+                    results[file_path] = future.result()
+                except Exception as exc:
+                    logger.debug(
+                        "Parallel probe error for %s: %s", file_path, exc)
+                    results[file_path] = None
+
+        return results
 
     def slice_segment(self, src: Path, start: float, end: float, dst: Path) -> bool:
         """Slice [start, end) segment of src into dst using stream-copy (-c copy).
@@ -313,9 +347,11 @@ class AudioSplitterService:
         segment_seconds: int = DEFAULT_SPLIT_SEGMENT_SECONDS,
         cancel_event: threading.Event | None = None,
         progress_callback: Callable[[str, int, int], None] | None = None,
+        worker_count: int = DEFAULT_PROBE_WORKER_COUNT,
     ) -> AudioSplitDirectorySummary:
         """Scan folder for audio files and split long tracks if split_enabled=True.
 
+        Probes audio durations concurrently with worker_count threads before slicing.
         Returns AudioSplitDirectorySummary containing all resulting file paths.
         """
         if not folder.is_dir():
@@ -349,6 +385,12 @@ class AudioSplitterService:
         pieces_created_count = 0
         unreadable_count = 0
 
+        durations = self.probe_durations_parallel(
+            files=audio_files,
+            worker_count=worker_count,
+            cancel_event=cancel_event,
+        )
+
         for idx, file_path in enumerate(audio_files):
             if cancel_event is not None and cancel_event.is_set():
                 raise AudioSplitterCancelledError(
@@ -357,10 +399,13 @@ class AudioSplitterService:
             if progress_callback is not None:
                 progress_callback(file_path.name, idx + 1, total_audio)
 
+            cached_duration = durations.get(file_path)
+
             res = self.split_file_in_place(
                 file_path=file_path,
                 threshold_seconds=threshold_seconds,
                 segment_seconds=segment_seconds,
+                duration=cached_duration,
                 cancel_event=cancel_event,
             )
 

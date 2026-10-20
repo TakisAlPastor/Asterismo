@@ -390,6 +390,7 @@ class HarvesterService:
                             done, tot, f"Splitting: {fname}")
                         if cb.on_progress
                         else None,
+                        worker_count=settings.fp_worker_count,
                     )
 
                     # 5. .pklz Database Building & Catalog Registration Phase
@@ -532,6 +533,7 @@ class HarvesterService:
                     done, tot, f"Splitting: {fname}")
                 if cb.on_progress
                 else None,
+                worker_count=settings.fp_worker_count,
             )
 
             if not split_summary.resulting_files:
