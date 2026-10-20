@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -109,6 +110,8 @@ class HarvesterService:
         self._skip_event = threading.Event()
         self._is_running = False
         self._lock = threading.Lock()
+        self._backoff_lock = threading.Lock()
+        self._backoff_until = 0.0
 
     # --------------------------------------------------------------------------
     # Lifecycle State Machine Controls
@@ -702,27 +705,33 @@ class HarvesterService:
         """Download pending audio tracks with rate-limit detection and exponential backoff."""
         ytdlp = self._ytdlp_factory(
             settings.cookies_browser, settings.extra_ytdlp_args)
-        curr_backoff = backoff_delay
         total_items = len(items)
+        max_workers = max(1, getattr(settings, "max_concurrent_downloads", 1))
 
-        for idx, item in enumerate(items, start=1):
-            self.wait_if_paused()
-            if self._stop_event.is_set():
-                return False, curr_backoff
-            if self._skip_event.is_set():
-                return False, curr_backoff
+        # Thread-safe tracking state
+        state_lock = threading.Lock()
+        completed_count = [0]
+        current_backoff = [backoff_delay]
+        aborted = [False]
 
+        def _download_single_item(idx: int, item: dict[str, Any]) -> bool:
             item_title = item.get("title", f"Track {idx}")
             item_url = item.get("url", "")
-            if callbacks.on_progress:
-                callbacks.on_progress(
-                    idx, total_items, f"Downloading: {item_title}")
 
-            download_succeeded = False
-            while not download_succeeded:
+            while not aborted[0] and not self._stop_event.is_set() and not self._skip_event.is_set():
                 self.wait_if_paused()
-                if self._stop_event.is_set() or self._skip_event.is_set():
-                    return False, curr_backoff
+
+                # Wait on global backoff cooldown if another worker triggered backoff
+                with self._backoff_lock:
+                    target_time = self._backoff_until
+                now = time.monotonic()
+                if now < target_time:
+                    sleep_dur = target_time - now
+                    t_end = time.monotonic() + sleep_dur
+                    while time.monotonic() < t_end:
+                        if self._stop_event.is_set() or self._skip_event.is_set():
+                            return False
+                        time.sleep(0.2)
 
                 try:
                     if task.source_type == HarvestSourceType.WEB_DIRECTORY or item_url.endswith(
@@ -740,11 +749,18 @@ class HarvesterService:
                             output_dir=staging_dir,
                             cancel_event=self._stop_event,
                         )
-                    download_succeeded = True
+
+                    with state_lock:
+                        completed_count[0] += 1
+                        done = completed_count[0]
+                    if callbacks.on_progress:
+                        callbacks.on_progress(
+                            done, total_items, f"Downloaded: {item_title}")
+                    return True
 
                 except (YtDlpCancelledError, Exception) as exc:
                     if self._stop_event.is_set() or self._skip_event.is_set():
-                        return False, curr_backoff
+                        return False
 
                     err_msg = str(exc).lower()
                     is_rate_limit = any(
@@ -753,33 +769,68 @@ class HarvesterService:
                     )
 
                     if is_rate_limit:
+                        with self._backoff_lock:
+                            delay = current_backoff[0]
+                            now_mono = time.monotonic()
+                            # Extend backoff gate for all workers
+                            self._backoff_until = max(
+                                self._backoff_until, now_mono + delay)
+                            current_backoff[0] = min(
+                                BACKOFF_MAX_SECONDS, delay * BACKOFF_MULTIPLIER)
+
                         if callbacks.on_backoff:
-                            callbacks.on_backoff(
-                                curr_backoff, f"Rate limited: {exc}")
+                            callbacks.on_backoff(delay, f"Rate limited: {exc}")
                         if callbacks.on_log:
                             callbacks.on_log(
-                                f"[!] Rate limit detected ({exc}). Backing off for {curr_backoff:.1f}s..."
+                                f"[!] Rate limit detected ({exc}). Backing off for {delay:.1f}s..."
                             )
 
-                        # Interruptible backoff sleep
-                        t_end = time.monotonic() + curr_backoff
+                        # Wait out this worker's backoff window
+                        t_end = time.monotonic() + delay
                         while time.monotonic() < t_end:
                             if self._stop_event.is_set() or self._skip_event.is_set():
-                                return False, curr_backoff
+                                return False
                             time.sleep(0.5)
-
-                        curr_backoff = min(
-                            BACKOFF_MAX_SECONDS, curr_backoff * BACKOFF_MULTIPLIER)
                     else:
                         logger.warning(
                             "Download error on track %s: %s", item_title, exc)
                         if callbacks.on_log:
                             callbacks.on_log(
                                 f"  ! Failed downloading '{item_title}': {exc}")
-                        # Non-rate-limit error: skip track to keep pipeline moving
-                        break
+                        # Non-rate-limit failure: mark single track done to let pipeline proceed
+                        with state_lock:
+                            completed_count[0] += 1
+                        return False
 
-        return True, curr_backoff
+            return False
+
+        if max_workers <= 1 or total_items <= 1:
+            for idx, item in enumerate(items, start=1):
+                self.wait_if_paused()
+                if self._stop_event.is_set() or self._skip_event.is_set():
+                    return False, current_backoff[0]
+                _download_single_item(idx, item)
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(_download_single_item, idx, item): item
+                    for idx, item in enumerate(items, start=1)
+                }
+                for fut in as_completed(futures):
+                    if self._stop_event.is_set() or self._skip_event.is_set():
+                        aborted[0] = True
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        return False, current_backoff[0]
+                    try:
+                        fut.result()
+                    except Exception as err:
+                        logger.warning(
+                            "Worker thread exception during download: %s", err)
+
+        if self._stop_event.is_set() or self._skip_event.is_set():
+            return False, current_backoff[0]
+
+        return True, current_backoff[0]
 
     def _handle_skipped_task(
         self,
