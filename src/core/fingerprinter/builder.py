@@ -154,8 +154,46 @@ class FingerprintBuilderService:
         self._catalog_repo = catalog_repo
         ensure_audfprint_importable()
 
+    def inspect_hashtable(
+        self,
+        ht: Any,
+        file_path: Path,
+        compute_sha256: bool = True,
+    ) -> PklzInspectionStats:
+        """Inspect an in-memory HashTable instance directly without disk re-reading."""
+        track_count = sum(1 for n in ht.names if n is not None)
+        total_hashes = int(np.sum(ht.counts))
+        stored_hashes = int(np.sum(np.minimum(ht.depth, ht.counts)))
+        dropped_hashes = max(0, total_hashes - stored_hashes)
+        dropped_pct = (100.0 * dropped_hashes /
+                       max(1, total_hashes)) if total_hashes > 0 else 0.0
+
+        sample_rate = int(ht.params.get(
+            "samplerate", AUDFPRINT_DEFAULT_SAMPLERATE))
+        hashbits = int(ht.hashbits)
+        bucketsize = int(ht.depth)
+        maxtime = int(1 << ht.maxtimebits)
+        file_size = file_path.stat().st_size if file_path.exists() else 0
+        sha256 = compute_file_sha256(file_path) if (
+            compute_sha256 and file_path.exists()) else ""
+
+        return PklzInspectionStats(
+            file_path=file_path,
+            track_count=track_count,
+            total_hashes=total_hashes,
+            stored_hashes=stored_hashes,
+            dropped_hashes=dropped_hashes,
+            dropped_percent=dropped_pct,
+            sample_rate=sample_rate,
+            hashbits=hashbits,
+            bucketsize=bucketsize,
+            maxtime=maxtime,
+            file_size_bytes=file_size,
+            sha256_hash=sha256,
+        )
+
     def inspect_pklz(self, pklz_path: Path, compute_sha256: bool = True) -> PklzInspectionStats:
-        """Inspect and parse an existing .pklz file into a PklzInspectionStats summary."""
+        """Inspect and parse an existing .pklz file from disk into a PklzInspectionStats summary."""
         ensure_audfprint_importable()
         import hash_table  # type: ignore[import-not-found]
 
@@ -169,35 +207,7 @@ class FingerprintBuilderService:
             raise FingerprintBuilderError(
                 f"Failed loading {pklz_path.name}: {exc}") from exc
 
-        track_count = sum(1 for n in ht.names if n is not None)
-        total_hashes = int(np.sum(ht.counts))
-        stored_hashes = int(np.sum(np.minimum(ht.depth, ht.counts)))
-        dropped_hashes = max(0, total_hashes - stored_hashes)
-        dropped_pct = (100.0 * dropped_hashes /
-                       max(1, total_hashes)) if total_hashes > 0 else 0.0
-
-        sample_rate = int(ht.params.get(
-            "samplerate", AUDFPRINT_DEFAULT_SAMPLERATE))
-        hashbits = int(ht.hashbits)
-        bucketsize = int(ht.depth)
-        maxtime = int(1 << ht.maxtimebits)
-        file_size = pklz_path.stat().st_size
-        sha256 = compute_file_sha256(pklz_path) if compute_sha256 else ""
-
-        return PklzInspectionStats(
-            file_path=pklz_path,
-            track_count=track_count,
-            total_hashes=total_hashes,
-            stored_hashes=stored_hashes,
-            dropped_hashes=dropped_hashes,
-            dropped_percent=dropped_pct,
-            sample_rate=sample_rate,
-            hashbits=hashbits,
-            bucketsize=bucketsize,
-            maxtime=maxtime,
-            file_size_bytes=file_size,
-            sha256_hash=sha256,
-        )
+        return self.inspect_hashtable(ht, file_path=pklz_path, compute_sha256=compute_sha256)
 
     def register_in_catalog(
         self,
@@ -231,8 +241,11 @@ class FingerprintBuilderService:
         shifts: int = AUDFPRINT_DEFAULT_SHIFTS,
         cancel_event: threading.Event | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
-    ) -> tuple[Path, list[Path]]:
-        """Build a .pklz file using direct in-process audfprint API calls."""
+    ) -> tuple[Path, list[Path], Any]:
+        """Build a .pklz file using direct in-process audfprint API calls.
+
+        Returns (output_pklz, unreadable_files, hashtable_instance).
+        """
         ensure_audfprint_importable()
         import audfprint_analyze  # type: ignore[import-not-found]
         import hash_table  # type: ignore[import-not-found]
@@ -289,7 +302,7 @@ class FingerprintBuilderService:
 
             ht.save(str(tmp_pklz))
             os.replace(tmp_pklz, output_pklz)
-            return output_pklz, unreadable
+            return output_pklz, unreadable, ht
 
         finally:
             if tmp_pklz.exists():
@@ -348,8 +361,7 @@ class FingerprintBuilderService:
 
             def _handle_line(line: str) -> None:
                 if line.startswith(_UNREADABLE_MARKER):
-                    raw_path = line[len(_UNREADABLE_MARKER)
-                                        :].rstrip(" skipping")
+                    raw_path = line[len(_UNREADABLE_MARKER)                                    :].rstrip(" skipping")
                     unreadable.append(Path(raw_path))
                 m = _INGESTING_REGEX.search(line)
                 if m and progress_callback is not None:
@@ -417,8 +429,7 @@ class FingerprintBuilderService:
 
                 def _part_line(line: str) -> None:
                     if line.startswith(_UNREADABLE_MARKER):
-                        raw_p = line[len(_UNREADABLE_MARKER)
-                                         :].rstrip(" skipping")
+                        raw_p = line[len(_UNREADABLE_MARKER)                                     :].rstrip(" skipping")
                         with lock:
                             unreadable.append(Path(raw_p))
                     m = _INGESTING_REGEX.search(line)
@@ -519,6 +530,7 @@ class FingerprintBuilderService:
                     batch_tracks) // AUDFPRINT_MIN_FILES_PER_PART))
 
             t0 = time.monotonic()
+            in_memory_ht = None
             if parts > 1:
                 final_path, unreadable = self.build_batch_subprocess(
                     audio_files=batch_tracks,
@@ -530,7 +542,7 @@ class FingerprintBuilderService:
                     progress_callback=progress_callback,
                 )
             else:
-                final_path, unreadable = self.build_batch_inprocess(
+                final_path, unreadable, in_memory_ht = self.build_batch_inprocess(
                     audio_files=batch_tracks,
                     output_pklz=target_pklz,
                     density=density,
@@ -539,7 +551,11 @@ class FingerprintBuilderService:
                 )
             elapsed = time.monotonic() - t0
 
-            stats = self.inspect_pklz(final_path, compute_sha256=True)
+            if in_memory_ht is not None:
+                stats = self.inspect_hashtable(
+                    in_memory_ht, final_path, compute_sha256=True)
+            else:
+                stats = self.inspect_pklz(final_path, compute_sha256=True)
             catalog_entry = self.register_in_catalog(
                 stats, prefix_label=archive_prefix, batch_index=batch_idx)
 

@@ -336,3 +336,36 @@ def test_builder_compute_file_sha256(tmp_path: Path) -> None:
     sha = compute_file_sha256(test_file)
     assert len(sha) == 64
     assert isinstance(sha, str)
+
+
+def test_inspect_hashtable_in_memory(tmp_path: Path) -> None:
+    mock_runner = MagicMock(spec=SilentProcessRunner)
+    mock_locator = MagicMock(spec=BinaryLocator)
+    service = FingerprintBuilderService(
+        runner=mock_runner, locator=mock_locator)
+
+    fake_file = tmp_path / "mock.pklz"
+    fake_file.write_bytes(b"DATA")
+
+    # Construct mock HashTable
+    mock_ht = MagicMock()
+    mock_ht.names = ["track1.wav", "track2.wav", None]
+    mock_ht.counts = [100, 200, 50]
+    mock_ht.depth = 100
+    mock_ht.params = {"samplerate": 11025}
+    mock_ht.hashbits = 20
+    mock_ht.maxtimebits = 14
+
+    stats = service.inspect_hashtable(
+        mock_ht, file_path=fake_file, compute_sha256=True)
+
+    assert stats.track_count == 2
+    assert stats.total_hashes == 350
+    # min(100, 100) + min(100, 200) + min(100, 50) = 100 + 100 + 50 = 250
+    assert stats.stored_hashes == 250
+    assert stats.dropped_hashes == 100
+    assert stats.sample_rate == 11025
+    assert stats.hashbits == 20
+    assert stats.maxtime == 16384
+    assert stats.file_size_bytes == 4
+    assert len(stats.sha256_hash) == 64
