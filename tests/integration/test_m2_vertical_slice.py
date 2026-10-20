@@ -153,6 +153,11 @@ def test_m2_harvester_view_end_to_end_queue_run(qapp: QApplication, tmp_path: Pa
     hv = window.harvester_view
     assert hv is not None
 
+    # Enable keep_downloaded_audio in settings to test hardlink retention
+    settings = hv._settings_repo.load()
+    settings.keep_downloaded_audio = True
+    hv._settings_repo.save(settings)
+
     # Mock YtDlpAdapter factory to return fake audio downloader
     fake_adapter = FakeMockYtDlpAdapter([audio_1, audio_2])
     hv._service._ytdlp_factory = lambda c, i: fake_adapter
@@ -193,6 +198,12 @@ def test_m2_harvester_view_end_to_end_queue_run(qapp: QApplication, tmp_path: Pa
     assert len(catalog_entries) >= 1
     assert catalog_entries[0].file_path == pklz_file.resolve()
     assert catalog_entries[0].track_count == 2
+
+    # 7. Verify pre-split hardlink audio retention
+    retained_dir = settings.paths.input_dir / "Fake_Channel"
+    assert retained_dir.is_dir()
+    retained_files = list(retained_dir.glob("*.wav"))
+    assert len(retained_files) == 2
 
 
 def test_m2_harvester_view_disk_folder_compilation(qapp: QApplication, tmp_path: Path) -> None:

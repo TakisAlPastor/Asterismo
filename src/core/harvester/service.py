@@ -361,7 +361,13 @@ class HarvesterService:
                     # Reset backoff on success
                     backoff_delay = BACKOFF_INITIAL_SECONDS
 
-                    # 3. Audio Splitting Phase
+                    # 3. Audio Retention Phase (Pre-Split)
+                    # Retain original whole tracks before splitting breaks them down
+                    if settings.keep_downloaded_audio and staging_dir.exists():
+                        self._retain_downloaded_audio(
+                            staging_dir, settings.paths.input_dir / effective_prefix, cb)
+
+                    # 4. Audio Splitting Phase
                     self.wait_if_paused()
                     if self._stop_event.is_set() or self._skip_event.is_set():
                         if self._skip_event.is_set():
@@ -386,7 +392,7 @@ class HarvesterService:
                         else None,
                     )
 
-                    # 4. .pklz Database Building & Catalog Registration Phase
+                    # 5. .pklz Database Building & Catalog Registration Phase
                     self.wait_if_paused()
                     if self._stop_event.is_set() or self._skip_event.is_set():
                         if self._skip_event.is_set():
@@ -427,18 +433,7 @@ class HarvesterService:
                                     f"{b_res.stats.total_hashes} hashes)."
                                 )
 
-                    # 5. Audio Retention / Cleanup
-                    if settings.keep_downloaded_audio and staging_dir.exists():
-                        dest_keep_dir = settings.paths.input_dir / effective_prefix
-                        dest_keep_dir.mkdir(parents=True, exist_ok=True)
-                        for f in staging_dir.iterdir():
-                            if f.is_file() and f.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                                target_f = dest_keep_dir / f.name
-                                if not target_f.exists():
-                                    try:
-                                        shutil.move(str(f), str(target_f))
-                                    except Exception:
-                                        pass
+                    # 6. Cleanup Staging Directory
                     shutil.rmtree(staging_dir, ignore_errors=True)
 
                     # Mark Task Completed
@@ -861,3 +856,43 @@ class HarvesterService:
         path_slug = slugify_title(parts.path.strip("/").replace("/", "_"))
         combined = f"{host}_{path_slug}".strip("_")
         return slugify_title(combined, max_length=40)
+
+    @staticmethod
+    def _retain_downloaded_audio(
+        staging_dir: Path,
+        dest_dir: Path,
+        cb: HarvesterCallbacks,
+    ) -> None:
+        """Preserve downloaded audio files via zero-copy hardlinks before splitting."""
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning(
+                "Could not create retention folder %s: %s", dest_dir, exc)
+            return
+
+        retained = 0
+        for f in staging_dir.iterdir():
+            if not f.is_file() or f.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
+                continue
+
+            target_file = dest_dir / f.name
+            if target_file.exists() and target_file.stat().st_size == f.stat().st_size:
+                continue
+
+            try:
+                # Primary attempt: OS hardlink (0 bytes extra disk space, instant on same volume)
+                os.link(f, target_file)
+                retained += 1
+            except OSError:
+                try:
+                    # Fallback: cross-device/volume copy
+                    shutil.copy2(f, target_file)
+                    retained += 1
+                except Exception as copy_err:
+                    logger.warning(
+                        "Failed retaining audio file %s: %s", f.name, copy_err)
+
+        if retained > 0 and cb.on_log:
+            cb.on_log(
+                f"[*] Retained {retained} whole audio track(s) in: {dest_dir}")
