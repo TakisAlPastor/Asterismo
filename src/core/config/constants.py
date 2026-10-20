@@ -55,8 +55,11 @@ BUFFER_CHUNK_SIZE_BYTES: int = 64 * 1024  # 64 KiB streaming chunk
 DIRECTORY_INDEX_SIGNATURES: tuple[str, ...] = (
     "index of", "directory listing for")
 IIS_PARENT_DIR_TEXT: str = "[to parent directory]"
-YTDLP_BEST_AUDIO_FORMAT: str = "ba/b"
-YTDLP_FILENAME_TEMPLATE: str = "%(id)s.%(ext)s"
+YTDLP_BEST_AUDIO_FORMAT: str = (
+    "bestaudio[ext=m4a]/bestaudio/best[ext=mp4][acodec!=none][height<=?480]"
+    "/best[ext=mp4][acodec!=none]/best[acodec!=none]"
+)
+YTDLP_FILENAME_TEMPLATE: str = "%(title).120B [%(id)s].%(ext)s"
 YOUTUBE_DEFAULT_BASE_URL: str = "https://www.youtube.com"
 ARCHIVE_ORG_HOST_SUBSTRING: str = "archive.org"
 BACKOFF_INITIAL_SECONDS: float = 30.0

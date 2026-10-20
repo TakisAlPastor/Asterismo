@@ -9,6 +9,10 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from src.core.config.constants import (
+    YTDLP_BEST_AUDIO_FORMAT,
+    YTDLP_FILENAME_TEMPLATE,
+)
 from src.core.config.models import BrowserCookieSource, HarvestSourceType
 from src.core.harvester.url_utils import (
     classify_url,
@@ -260,7 +264,8 @@ def test_ytdlp_adapter_build_opts() -> None:
     )
     opts = adapter._build_opts(outtmpl="%(id)s.%(ext)s", flat_playlist=True)
 
-    assert opts["format"] == "ba/b"
+    assert opts["format"] == YTDLP_BEST_AUDIO_FORMAT
+    assert opts["windowsfilenames"] is True
     assert opts["noplaylist"] is False
     assert opts["extract_flat"] == "in_playlist"
     assert opts["cookiesfrombrowser"] == ("firefox",)

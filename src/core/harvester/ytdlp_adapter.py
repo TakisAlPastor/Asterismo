@@ -54,6 +54,8 @@ class YtDlpAdapter:
             "format": YTDLP_BEST_AUDIO_FORMAT,
             "noplaylist": True,
             "ignoreerrors": False,
+            "windowsfilenames": True,
+            "restrictfilenames": False,
         }
 
         if flat_playlist:
@@ -178,21 +180,36 @@ class YtDlpAdapter:
                 if filename and os.path.exists(filename):
                     downloaded_filepath.append(filename)
 
+        def _postprocessor_hook(status_dict: dict[str, Any]) -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise YtDlpCancelledError("Download cancelled by user.")
+            filepath = status_dict.get("filepath")
+            if filepath and os.path.exists(filepath):
+                downloaded_filepath.append(filepath)
+
         opts = self._build_opts(outtmpl=outtmpl, progress_hook=_hook)
+        opts["postprocessor_hooks"] = [_postprocessor_hook]
+
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
+                if cancel_event is not None and cancel_event.is_set():
+                    raise YtDlpCancelledError("Download cancelled by user.")
         except YtDlpCancelledError:
             raise
         except Exception as exc:
             raise YtDlpError(f"Failed downloading {url}: {exc}") from exc
 
-        if downloaded_filepath and os.path.exists(downloaded_filepath[0]):
-            return Path(downloaded_filepath[0])
+        if cancel_event is not None and cancel_event.is_set():
+            raise YtDlpCancelledError("Download cancelled by user.")
 
-        # If yt-dlp downloaded but filename wasn't captured in hook, search output_dir
-        # for newest file matching output pattern
-        candidates = list(output_dir.glob("*"))
+        # Prefer the most recently recorded valid path (often transformed by post-processors)
+        for cand in reversed(downloaded_filepath):
+            if os.path.isfile(cand):
+                return Path(cand)
+
+        # Fallback only if hook/prepare_filename missed extension switch
+        candidates = [p for p in output_dir.glob("*") if p.is_file()]
         if candidates:
             candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
             return candidates[0]
