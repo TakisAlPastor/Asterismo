@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -22,8 +22,6 @@ from PySide6.QtWidgets import (
 
 from src.core.config.constants import (
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
-    DEFAULT_SPLIT_SEGMENT_SECONDS,
-    DEFAULT_SPLIT_THRESHOLD_SECONDS,
     MIN_POSITIVE_INT,
 )
 from src.core.config.models import (
@@ -150,7 +148,7 @@ class SettingsView(QWidget):
         opts_card.setProperty("class", "card")
         opts_layout = QVBoxLayout(opts_card)
 
-        opts_title = QLabel("Pipeline & Appearance", opts_card)
+        opts_title = QLabel("System & Appearance", opts_card)
         opts_title.setProperty("class", "header")
         opts_layout.addWidget(opts_title)
 
@@ -171,36 +169,17 @@ class SettingsView(QWidget):
             [ScanMode.QUICK.value, ScanMode.LONG.value, ScanMode.BOTH.value])
         opts_grid.addWidget(self._scan_combo, 0, 3)
 
-        # Split Audio Checkbox & Thresholds
-        self._split_audio_cb = QCheckBox("Split Long Audio Files", opts_card)
-        opts_grid.addWidget(self._split_audio_cb, 1, 0, 1, 2)
-
-        self._keep_audio_cb = QCheckBox(
-            "Keep Downloaded Audio Files", opts_card)
-        opts_grid.addWidget(self._keep_audio_cb, 1, 2, 1, 2)
-
-        opts_grid.addWidget(QLabel("Split Threshold (sec):", opts_card), 2, 0)
-        self._threshold_spin = QSpinBox(opts_card)
-        self._threshold_spin.setRange(MIN_POSITIVE_INT, 86400)
-        opts_grid.addWidget(self._threshold_spin, 2, 1)
-
         opts_grid.addWidget(
-            QLabel("Split Segment Size (sec):", opts_card), 2, 2)
-        self._segment_spin = QSpinBox(opts_card)
-        self._segment_spin.setRange(MIN_POSITIVE_INT, 86400)
-        opts_grid.addWidget(self._segment_spin, 2, 3)
-
-        opts_grid.addWidget(
-            QLabel("Max Concurrent Downloads:", opts_card), 3, 0)
+            QLabel("Max Concurrent Downloads:", opts_card), 1, 0)
         self._downloads_spin = QSpinBox(opts_card)
         self._downloads_spin.setRange(MIN_POSITIVE_INT, 16)
-        opts_grid.addWidget(self._downloads_spin, 3, 1)
+        opts_grid.addWidget(self._downloads_spin, 1, 1)
 
         opts_grid.addWidget(
-            QLabel("Fingerprint Worker Count:", opts_card), 3, 2)
+            QLabel("Fingerprint Worker Count:", opts_card), 1, 2)
         self._workers_spin = QSpinBox(opts_card)
         self._workers_spin.setRange(MIN_POSITIVE_INT, 32)
-        opts_grid.addWidget(self._workers_spin, 3, 3)
+        opts_grid.addWidget(self._workers_spin, 1, 3)
 
         opts_layout.addLayout(opts_grid)
         container_layout.addWidget(opts_card)
@@ -295,10 +274,6 @@ class SettingsView(QWidget):
 
         self._theme_combo.setCurrentText(settings.theme.value)
         self._scan_combo.setCurrentText(settings.scan_mode.value)
-        self._split_audio_cb.setChecked(settings.split_long_audio)
-        self._keep_audio_cb.setChecked(settings.keep_downloaded_audio)
-        self._threshold_spin.setValue(settings.split_threshold_seconds)
-        self._segment_spin.setValue(settings.split_segment_seconds)
         self._downloads_spin.setValue(settings.max_concurrent_downloads)
         self._workers_spin.setValue(settings.fp_worker_count)
 
@@ -319,19 +294,13 @@ class SettingsView(QWidget):
             archive_dir=Path(self._archive_dir_edit.text().strip()),
         )
 
-        settings = AppSettings(
+        settings = replace(
+            current,
             paths=paths,
             theme=ThemeMode(self._theme_combo.currentText()),
             scan_mode=ScanMode(self._scan_combo.currentText()),
-            split_long_audio=self._split_audio_cb.isChecked(),
-            split_threshold_seconds=self._threshold_spin.value(),
-            split_segment_seconds=self._segment_spin.value(),
             max_concurrent_downloads=self._downloads_spin.value(),
             fp_worker_count=self._workers_spin.value(),
-            keep_downloaded_audio=self._keep_audio_cb.isChecked(),
-            cookies_browser=current.cookies_browser,
-            skip_already_fingerprinted=current.skip_already_fingerprinted,
-            extra_ytdlp_args=current.extra_ytdlp_args,
         )
 
         secrets = SecretCredentials(
@@ -361,10 +330,6 @@ class SettingsView(QWidget):
 
         self._theme_combo.setCurrentText(defaults.theme.value)
         self._scan_combo.setCurrentText(defaults.scan_mode.value)
-        self._split_audio_cb.setChecked(defaults.split_long_audio)
-        self._keep_audio_cb.setChecked(defaults.keep_downloaded_audio)
-        self._threshold_spin.setValue(defaults.split_threshold_seconds)
-        self._segment_spin.setValue(defaults.split_segment_seconds)
         self._downloads_spin.setValue(defaults.max_concurrent_downloads)
         self._workers_spin.setValue(defaults.fp_worker_count)
 

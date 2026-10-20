@@ -236,3 +236,48 @@ def test_m2_harvester_view_disk_folder_compilation(qapp: QApplication, tmp_path:
     # Verify catalog contains entry
     catalog = hv._service._catalog_repo.list_entries()
     assert any(e.prefix_label == "local_test_db" for e in catalog)
+
+
+def test_m2_harvester_view_options_persistence(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify quick options in HarvesterView persist immediately and are not overwritten by SettingsView."""
+    app, window = bootstrap_application(base_dir=tmp_path)
+    hv = window.harvester_view
+    assert hv is not None
+
+    # 1. Modify Harvester options via UI widgets
+    hv._keep_cb.setChecked(True)
+    hv._split_cb.setChecked(True)
+    assert hv._threshold_spin.isEnabled()
+    assert hv._segment_spin.isEnabled()
+
+    hv._threshold_spin.setValue(1200)
+    hv._segment_spin.setValue(600)
+    hv._cookie_combo.setCurrentText(BrowserCookieSource.FIREFOX.value)
+
+    # 2. Assert SQLite state reflects immediately
+    settings = hv._settings_repo.load()
+    assert settings.keep_downloaded_audio is True
+    assert settings.split_long_audio is True
+    assert settings.split_threshold_seconds == 1200
+    assert settings.split_segment_seconds == 600
+    assert settings.cookies_browser == BrowserCookieSource.FIREFOX
+
+    # 3. Simulate saving from SettingsView and verify Harvester options remain intact
+    sv = window.settings_view
+    sv.save_data()
+
+    settings_after_sv = hv._settings_repo.load()
+    assert settings_after_sv.keep_downloaded_audio is True
+    assert settings_after_sv.split_long_audio is True
+    assert settings_after_sv.split_threshold_seconds == 1200
+    assert settings_after_sv.split_segment_seconds == 600
+    assert settings_after_sv.cookies_browser == BrowserCookieSource.FIREFOX
+
+    # 4. Toggle split off and verify spinboxes disabled
+    hv._split_cb.setChecked(False)
+    assert not hv._threshold_spin.isEnabled()
+    assert not hv._segment_spin.isEnabled()
+    assert hv._settings_repo.load().split_long_audio is False
+
+    window.close()
+

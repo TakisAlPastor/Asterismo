@@ -1,6 +1,8 @@
 """Harvester View for URL queue management, crawling, downloading, and local .pklz compilation."""
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
@@ -15,13 +17,20 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from src.core.config.models import BrowserCookieSource, HarvestTask, HarvestTaskStatus
+from src.core.config.constants import MIN_POSITIVE_INT
+from src.core.config.models import (
+    AppSettings,
+    BrowserCookieSource,
+    HarvestTask,
+    HarvestTaskStatus,
+)
 from src.core.database.settings_repository import SettingsRepository
 from src.core.harvester.service import HarvesterService, HarvestRunSummary
 from src.ui.theme import (
@@ -35,6 +44,8 @@ from src.ui.theme import (
     LAYOUT_SPACING_STD,
 )
 from src.ui.workers.harvester_worker import HarvesterWorker
+
+logger = logging.getLogger(__name__)
 
 
 class HarvesterView(QWidget):
@@ -121,6 +132,7 @@ class HarvesterView(QWidget):
 
         # Quick Options Bar
         opts_row = QHBoxLayout()
+        opts_row.setSpacing(LAYOUT_SPACING_STD)
         opts_row.addWidget(QLabel("Browser Cookies:", queue_card))
         self._cookie_combo = QComboBox(queue_card)
         self._cookie_combo.addItems([e.value for e in BrowserCookieSource])
@@ -130,16 +142,33 @@ class HarvesterView(QWidget):
             self.on_cookie_source_changed)
         opts_row.addWidget(self._cookie_combo)
 
-        self._split_cb = QCheckBox(
-            "Split Long Audio (>12m into 6m)", queue_card)
-        self._split_cb.setChecked(settings.split_long_audio)
-        self._split_cb.toggled.connect(self.on_split_option_changed)
-        opts_row.addWidget(self._split_cb)
-
         self._keep_cb = QCheckBox("Keep Downloaded Audio", queue_card)
         self._keep_cb.setChecked(settings.keep_downloaded_audio)
         self._keep_cb.toggled.connect(self.on_keep_audio_changed)
         opts_row.addWidget(self._keep_cb)
+
+        self._split_cb = QCheckBox("Split Long Audio", queue_card)
+        self._split_cb.setChecked(settings.split_long_audio)
+        self._split_cb.toggled.connect(self.on_split_option_changed)
+        opts_row.addWidget(self._split_cb)
+
+        self._threshold_label = QLabel("Threshold (s):", queue_card)
+        opts_row.addWidget(self._threshold_label)
+        self._threshold_spin = QSpinBox(queue_card)
+        self._threshold_spin.setRange(MIN_POSITIVE_INT, 86400)
+        self._threshold_spin.setValue(settings.split_threshold_seconds)
+        self._threshold_spin.setEnabled(settings.split_long_audio)
+        self._threshold_spin.valueChanged.connect(self.on_threshold_changed)
+        opts_row.addWidget(self._threshold_spin)
+
+        self._segment_label = QLabel("Segment (s):", queue_card)
+        opts_row.addWidget(self._segment_label)
+        self._segment_spin = QSpinBox(queue_card)
+        self._segment_spin.setRange(MIN_POSITIVE_INT, 86400)
+        self._segment_spin.setValue(settings.split_segment_seconds)
+        self._segment_spin.setEnabled(settings.split_long_audio)
+        self._segment_spin.valueChanged.connect(self.on_segment_changed)
+        opts_row.addWidget(self._segment_spin)
 
         opts_row.addStretch()
 
@@ -341,23 +370,7 @@ class HarvesterView(QWidget):
         try:
             source = BrowserCookieSource(cookie_text)
             current = self._settings_repo.load()
-            updated = AppSettings(
-                paths=current.paths,
-                theme=current.theme,
-                scan_mode=current.scan_mode,
-                split_long_audio=current.split_long_audio,
-                split_threshold_seconds=current.split_threshold_seconds,
-                split_segment_seconds=current.split_segment_seconds,
-                max_concurrent_downloads=current.max_concurrent_downloads,
-                fp_worker_count=current.fp_worker_count,
-                keep_downloaded_audio=current.keep_downloaded_audio,
-                cookie_source=source,
-                impersonate_target=current.impersonate_target,
-                batch_size=current.batch_size,
-                min_duration_seconds=current.min_duration_seconds,
-                max_duration_seconds=current.max_duration_seconds,
-                date_after_yyyymmdd=current.date_after_yyyymmdd,
-            )
+            updated = replace(current, cookies_browser=source)
             self._settings_repo.save(updated)
             self.log_requested.emit(
                 f"Updated browser cookies source to '{source.value}'.")
@@ -366,48 +379,50 @@ class HarvesterView(QWidget):
 
     @Slot(bool)
     def on_split_option_changed(self, enabled: bool) -> None:
-        """Persist long-audio splitting checkbox preference."""
+        """Persist long-audio splitting checkbox preference and toggle threshold inputs."""
+        self._threshold_spin.setEnabled(enabled)
+        self._segment_spin.setEnabled(enabled)
         current = self._settings_repo.load()
-        updated = AppSettings(
-            paths=current.paths,
-            theme=current.theme,
-            scan_mode=current.scan_mode,
-            split_long_audio=enabled,
-            split_threshold_seconds=current.split_threshold_seconds,
-            split_segment_seconds=current.split_segment_seconds,
-            max_concurrent_downloads=current.max_concurrent_downloads,
-            fp_worker_count=current.fp_worker_count,
-            keep_downloaded_audio=current.keep_downloaded_audio,
-            cookie_source=current.cookie_source,
-            impersonate_target=current.impersonate_target,
-            batch_size=current.batch_size,
-            min_duration_seconds=current.min_duration_seconds,
-            max_duration_seconds=current.max_duration_seconds,
-            date_after_yyyymmdd=current.date_after_yyyymmdd,
-        )
+        updated = replace(current, split_long_audio=enabled)
+        self._settings_repo.save(updated)
+
+    @Slot(int)
+    def on_threshold_changed(self, value: int) -> None:
+        """Persist split threshold seconds ensuring segment size does not exceed threshold."""
+        if self._segment_spin.value() > value:
+            self._segment_spin.setValue(value)
+        current = self._settings_repo.load()
+        if value < current.split_segment_seconds:
+            updated = replace(
+                current,
+                split_threshold_seconds=value,
+                split_segment_seconds=value,
+            )
+        else:
+            updated = replace(current, split_threshold_seconds=value)
+        self._settings_repo.save(updated)
+
+    @Slot(int)
+    def on_segment_changed(self, value: int) -> None:
+        """Persist split segment seconds ensuring threshold is at least segment size."""
+        if self._threshold_spin.value() < value:
+            self._threshold_spin.setValue(value)
+        current = self._settings_repo.load()
+        if value > current.split_threshold_seconds:
+            updated = replace(
+                current,
+                split_threshold_seconds=value,
+                split_segment_seconds=value,
+            )
+        else:
+            updated = replace(current, split_segment_seconds=value)
         self._settings_repo.save(updated)
 
     @Slot(bool)
     def on_keep_audio_changed(self, enabled: bool) -> None:
         """Persist keep downloaded audio preference."""
         current = self._settings_repo.load()
-        updated = AppSettings(
-            paths=current.paths,
-            theme=current.theme,
-            scan_mode=current.scan_mode,
-            split_long_audio=current.split_long_audio,
-            split_threshold_seconds=current.split_threshold_seconds,
-            split_segment_seconds=current.split_segment_seconds,
-            max_concurrent_downloads=current.max_concurrent_downloads,
-            fp_worker_count=current.fp_worker_count,
-            keep_downloaded_audio=enabled,
-            cookie_source=current.cookie_source,
-            impersonate_target=current.impersonate_target,
-            batch_size=current.batch_size,
-            min_duration_seconds=current.min_duration_seconds,
-            max_duration_seconds=current.max_duration_seconds,
-            date_after_yyyymmdd=current.date_after_yyyymmdd,
-        )
+        updated = replace(current, keep_downloaded_audio=enabled)
         self._settings_repo.save(updated)
 
     @Slot()

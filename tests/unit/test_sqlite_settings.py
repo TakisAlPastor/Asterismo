@@ -129,6 +129,7 @@ def test_settings_repository_save_and_load_roundtrip(
         output_dir=tmp_path / "custom_out",
         logs_dir=tmp_path / "custom_logs",
         bin_dir=tmp_path / "custom_bin",
+        archive_dir=tmp_path / "custom_archive",
     )
     custom_settings = AppSettings(
         paths=custom_paths,

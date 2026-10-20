@@ -66,9 +66,6 @@ class TestMilestone1VerticalSlice:
         settings_view._archive_dir_edit.setText(str(new_archive))
         settings_view._theme_combo.setCurrentText(ThemeMode.LIGHT.value)
         settings_view._scan_combo.setCurrentText(ScanMode.LONG.value)
-        settings_view._split_audio_cb.setChecked(False)
-        settings_view._threshold_spin.setValue(900)
-        settings_view._segment_spin.setValue(450)
         settings_view._downloads_spin.setValue(6)
         settings_view._workers_spin.setValue(8)
 
@@ -90,9 +87,6 @@ class TestMilestone1VerticalSlice:
         assert sv2._archive_dir_edit.text() == str(new_archive)
         assert sv2._theme_combo.currentText() == ThemeMode.LIGHT.value
         assert sv2._scan_combo.currentText() == ScanMode.LONG.value
-        assert sv2._split_audio_cb.isChecked() is False
-        assert sv2._threshold_spin.value() == 900
-        assert sv2._segment_spin.value() == 450
         assert sv2._downloads_spin.value() == 6
         assert sv2._workers_spin.value() == 8
 
