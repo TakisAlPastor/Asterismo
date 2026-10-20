@@ -33,7 +33,7 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
 
     # 1. Initialize default workspace paths and ensure directories exist
     paths = WorkspacePaths.default(base_dir)
-    for p in (paths.input_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir):
+    for p in (paths.input_dir, paths.archive_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir):
         p.mkdir(parents=True, exist_ok=True)
 
     # 2. Initialize Database and run migrations (V1, V2)

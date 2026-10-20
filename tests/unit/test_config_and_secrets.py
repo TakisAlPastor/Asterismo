@@ -39,6 +39,7 @@ def test_workspace_paths_default_and_roundtrip(tmp_path: Path) -> None:
     assert paths.output_dir == base_dir.resolve() / "output"
     assert paths.logs_dir == base_dir.resolve() / "logs"
     assert paths.bin_dir == base_dir.resolve() / "bin"
+    assert paths.archive_dir == base_dir.resolve() / "archive"
     assert restored == paths
 
 

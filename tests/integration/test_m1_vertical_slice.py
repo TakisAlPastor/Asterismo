@@ -60,8 +60,10 @@ class TestMilestone1VerticalSlice:
         # Act: Fill modified values in UI widgets
         new_input = tmp_path / "custom_input"
         new_db = tmp_path / "custom_db"
+        new_archive = tmp_path / "custom_archive"
         settings_view._input_dir_edit.setText(str(new_input))
         settings_view._db_dir_edit.setText(str(new_db))
+        settings_view._archive_dir_edit.setText(str(new_archive))
         settings_view._theme_combo.setCurrentText(ThemeMode.LIGHT.value)
         settings_view._scan_combo.setCurrentText(ScanMode.LONG.value)
         settings_view._split_audio_cb.setChecked(False)
@@ -85,6 +87,7 @@ class TestMilestone1VerticalSlice:
 
         assert sv2._input_dir_edit.text() == str(new_input)
         assert sv2._db_dir_edit.text() == str(new_db)
+        assert sv2._archive_dir_edit.text() == str(new_archive)
         assert sv2._theme_combo.currentText() == ThemeMode.LIGHT.value
         assert sv2._scan_combo.currentText() == ScanMode.LONG.value
         assert sv2._split_audio_cb.isChecked() is False

@@ -199,11 +199,14 @@ def test_m2_harvester_view_end_to_end_queue_run(qapp: QApplication, tmp_path: Pa
     assert catalog_entries[0].file_path == pklz_file.resolve()
     assert catalog_entries[0].track_count == 2
 
-    # 7. Verify pre-split hardlink audio retention
-    retained_dir = settings.paths.input_dir / "Fake_Channel"
+    # 7. Verify pre-split hardlink audio retention in dedicated archive_dir
+    retained_dir = settings.paths.archive_dir / "Fake_Channel"
     assert retained_dir.is_dir()
     retained_files = list(retained_dir.glob("*.wav"))
     assert len(retained_files) == 2
+
+    # Verify input_dir remains unpolluted for scanner input
+    assert not (settings.paths.input_dir / "Fake_Channel").exists()
 
 
 def test_m2_harvester_view_disk_folder_compilation(qapp: QApplication, tmp_path: Path) -> None:

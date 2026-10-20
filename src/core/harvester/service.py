@@ -365,7 +365,7 @@ class HarvesterService:
                     # Retain original whole tracks before splitting breaks them down
                     if settings.keep_downloaded_audio and staging_dir.exists():
                         self._retain_downloaded_audio(
-                            staging_dir, settings.paths.input_dir / effective_prefix, cb)
+                            staging_dir, settings.paths.archive_dir / effective_prefix, cb)
 
                     # 4. Audio Splitting Phase
                     self.wait_if_paused()

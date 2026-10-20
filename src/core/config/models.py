@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from src.core.config.constants import (
+    DEFAULT_ARCHIVE_DIRNAME,
     DEFAULT_DB_DIRNAME,
     DEFAULT_FP_WORKER_COUNT,
     DEFAULT_INPUT_DIRNAME,
@@ -116,6 +117,7 @@ class WorkspacePaths:
     output_dir: Path
     logs_dir: Path
     bin_dir: Path
+    archive_dir: Path
 
     @classmethod
     def default(cls, base_dir: Path) -> WorkspacePaths:
@@ -123,6 +125,7 @@ class WorkspacePaths:
         resolved = base_dir.resolve()
         return cls(
             input_dir=resolved / DEFAULT_INPUT_DIRNAME,
+            archive_dir=resolved / DEFAULT_ARCHIVE_DIRNAME,
             db_dir=resolved / DEFAULT_DB_DIRNAME,
             output_dir=resolved / DEFAULT_OUTPUT_DIRNAME,
             logs_dir=resolved / DEFAULT_LOGS_DIRNAME,
@@ -133,6 +136,7 @@ class WorkspacePaths:
         """Serialize paths to string dictionary."""
         return {
             "input_dir": str(self.input_dir),
+            "archive_dir": str(self.archive_dir),
             "db_dir": str(self.db_dir),
             "output_dir": str(self.output_dir),
             "logs_dir": str(self.logs_dir),
@@ -145,6 +149,7 @@ class WorkspacePaths:
         defaults = cls.default(base_dir)
         return cls(
             input_dir=Path(data.get("input_dir", defaults.input_dir)),
+            archive_dir=Path(data.get("archive_dir", defaults.archive_dir)),
             db_dir=Path(data.get("db_dir", defaults.db_dir)),
             output_dir=Path(data.get("output_dir", defaults.output_dir)),
             logs_dir=Path(data.get("logs_dir", defaults.logs_dir)),
