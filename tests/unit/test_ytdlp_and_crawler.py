@@ -87,6 +87,19 @@ def test_generate_item_key() -> None:
         HarvestSourceType.YTDLP_URL, "youtube:dQw4w9WgXcQ")
     assert key_ytdlp == "ytdlp:youtube:dQw4w9WgXcQ"
 
+    # Canonicalize full URL to YouTube video ID
+    key_yt_url = generate_item_key(
+        HarvestSourceType.YTDLP_URL,
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share",
+    )
+    assert key_yt_url == "ytdlp:dQw4w9WgXcQ"
+
+    key_yt_short = generate_item_key(
+        HarvestSourceType.YTDLP_URL,
+        "https://youtu.be/dQw4w9WgXcQ",
+    )
+    assert key_yt_short == "ytdlp:dQw4w9WgXcQ"
+
     key_web = generate_item_key(
         HarvestSourceType.WEB_DIRECTORY,
         "track01.mp3",
@@ -95,10 +108,21 @@ def test_generate_item_key() -> None:
     assert key_web.startswith("web:example.com-")
     assert len(key_web) == len("web:example.com-") + 10
 
-    key_local = generate_item_key(
+    # Ensure path normalization matches across variations
+    key_web_slashes = generate_item_key(
+        HarvestSourceType.WEB_DIRECTORY,
+        "track01.mp3",
+        "https://www.example.com//music///track01.mp3",
+    )
+    assert key_web_slashes == key_web
+
+    key_local1 = generate_item_key(
         HarvestSourceType.LOCAL_DISK, r"C:\Music\Track01.wav")
-    assert key_local.startswith("local:")
-    assert len(key_local) == 6 + 16
+    key_local2 = generate_item_key(
+        HarvestSourceType.LOCAL_DISK, "C:/Music/Track01.wav/")
+    assert key_local1.startswith("local:")
+    assert len(key_local1) == 6 + 16
+    assert key_local1 == key_local2
 
 
 def test_slugify_title() -> None:

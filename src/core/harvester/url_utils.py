@@ -145,7 +145,24 @@ def generate_item_key(
     - LOCAL_DISK: 'local:<sha1[:16]>'
     """
     if source_type == HarvestSourceType.YTDLP_URL:
-        clean_id = identifier.strip().replace(" ", "_")
+        raw_id = identifier.strip()
+        # Canonicalize full URL identifiers if passed instead of bare id
+        if "://" in raw_id:
+            try:
+                parts = urlsplit(raw_id)
+                host = parts.netloc.lower()
+                host_no_www = host[4:] if host.startswith("www.") else host
+                if host_no_www in _YOUTUBE_DOMAINS:
+                    query_params = dict(parse_qsl(parts.query))
+                    if "v" in query_params:
+                        raw_id = query_params["v"]
+                    elif parts.path.startswith("/shorts/"):
+                        raw_id = parts.path.split("/")[2]
+                    elif host_no_www == "youtu.be":
+                        raw_id = parts.path.strip("/")
+            except Exception:
+                pass
+        clean_id = raw_id.replace(" ", "_")
         return f"ytdlp:{clean_id}"
 
     if source_type == HarvestSourceType.WEB_DIRECTORY:
@@ -156,7 +173,9 @@ def generate_item_key(
             host = host[4:] if host.startswith("www.") else host
             site = re.sub(r"[^a-z0-9.-]+", "-", host.rsplit("@", 1)
                           [-1].split(":", 1)[0]).strip("-.")[:40] or "web"
-            raw_target = f"{host}{unquote(parts.path)}"
+            # Normalize path: unquote, collapse multiple slashes, strip trailing slash for item keys
+            clean_path = re.sub(r"/+", "/", unquote(parts.path)).rstrip("/")
+            raw_target = f"{host}{clean_path}"
         except Exception:
             site = "web"
             raw_target = target_url
@@ -166,7 +185,8 @@ def generate_item_key(
         return f"web:{site}-{digest}"
 
     # LOCAL_DISK or fallback
-    digest = hashlib.sha1(identifier.encode(
+    normalized_path = identifier.strip().replace("\\", "/").rstrip("/")
+    digest = hashlib.sha1(normalized_path.encode(
         "utf-8", "replace")).hexdigest()[:16]
     return f"local:{digest}"
 
