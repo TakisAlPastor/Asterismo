@@ -48,6 +48,17 @@ MIGRATION_V2_NAME: str = "002_milestone2_harvester_and_catalog"
 MAX_QUEUE_LINKS: int = 1000
 WEB_CRAWLER_MAX_DEPTH: int = 25
 WEB_CRAWLER_MAX_FOLDERS: int = 5000
+WEB_CRAWLER_MAX_PAGE_BYTES: int = 2 * 1024 * \
+    1024  # 2 MiB HTML parse safety limit
+DEFAULT_HTTP_TIMEOUT_SEC: float = 30.0
+BUFFER_CHUNK_SIZE_BYTES: int = 64 * 1024  # 64 KiB streaming chunk
+DIRECTORY_INDEX_SIGNATURES: tuple[str, ...] = (
+    "index of", "directory listing for")
+IIS_PARENT_DIR_TEXT: str = "[to parent directory]"
+YTDLP_BEST_AUDIO_FORMAT: str = "ba/b"
+YTDLP_FILENAME_TEMPLATE: str = "%(id)s.%(ext)s"
+YOUTUBE_DEFAULT_BASE_URL: str = "https://www.youtube.com"
+ARCHIVE_ORG_HOST_SUBSTRING: str = "archive.org"
 BACKOFF_INITIAL_SECONDS: float = 30.0
 BACKOFF_MAX_SECONDS: float = 600.0
 BACKOFF_MULTIPLIER: float = 2.0
