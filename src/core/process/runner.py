@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from src.core.config.constants import (
     DEFAULT_SUBPROCESS_TIMEOUT_SEC,
@@ -103,6 +103,98 @@ class SilentProcessRunner:
         except subprocess.TimeoutExpired as exc:
             self._kill_process(proc)
             proc.communicate()  # drain pipes
+            raise exc
+        finally:
+            with self._lock:
+                self._active_processes.pop(proc.pid, None)
+
+    def run_streaming(
+        self,
+        command: Sequence[str],
+        on_stdout_line: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+        timeout: float = DEFAULT_SUBPROCESS_TIMEOUT_SEC,
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> ProcessResult:
+        """Execute a CLI command silently, streaming stdout lines in real-time.
+
+        Args:
+            command: Command and arguments sequence.
+            on_stdout_line: Optional callback invoked for each line of stdout.
+            cancel_event: Optional event monitored to trigger premature process termination.
+            timeout: Subprocess timeout in seconds.
+            env: Optional environment variables dictionary.
+            cwd: Working directory.
+
+        Returns:
+            ProcessResult with complete captured stdout and stderr.
+        """
+        cmd_tuple = tuple(str(arg) for arg in command)
+        creation_flags = 0
+        startupinfo = None
+
+        if sys.platform == "win32":
+            creation_flags = WIN32_CREATE_NO_WINDOW
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = WIN32_SW_HIDE
+
+        run_env = os.environ.copy()
+        if env:
+            run_env.update(env)
+
+        proc = subprocess.Popen(
+            list(cmd_tuple),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creation_flags,
+            startupinfo=startupinfo,
+            env=run_env,
+            cwd=cwd,
+            text=True,
+            bufsize=1,
+            encoding=UTF8_ENCODING,
+            errors=ENCODING_ERROR_POLICY,
+        )
+
+        with self._lock:
+            self._active_processes[proc.pid] = proc
+
+        stdout_lines: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def _drain_stderr() -> None:
+            if proc.stderr is not None:
+                for line in proc.stderr:
+                    stderr_chunks.append(line)
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        try:
+            if proc.stdout is not None:
+                for raw_line in proc.stdout:
+                    if cancel_event is not None and cancel_event.is_set():
+                        self._kill_process(proc)
+                        break
+                    line = raw_line.rstrip("\r\n")
+                    stdout_lines.append(line)
+                    if on_stdout_line is not None:
+                        on_stdout_line(line)
+
+            proc.wait(timeout=timeout)
+            stderr_thread.join(timeout=2.0)
+            return ProcessResult(
+                returncode=proc.returncode if proc.returncode is not None else -1,
+                stdout="\n".join(stdout_lines),
+                stderr="".join(stderr_chunks),
+                command=cmd_tuple,
+            )
+        except subprocess.TimeoutExpired as exc:
+            self._kill_process(proc)
+            stderr_thread.join(timeout=1.0)
             raise exc
         finally:
             with self._lock:

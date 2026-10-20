@@ -181,7 +181,10 @@ class QueueReaderThread(threading.Thread):
 
     def run(self):
         while True:
-            data = self.fh.read(self.blocksize)
+            try:
+                data = self.fh.read(self.blocksize)
+            except (ValueError, OSError):
+                break
             if not self.discard:
                 self.queue.put(data)
             if not data:

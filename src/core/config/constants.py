@@ -90,6 +90,10 @@ TRACKING_QUERY_PREFIX: str = "utm_"
 PART_FILE_SUFFIX: str = ".part"
 PKLZ_EXTENSION: str = ".pklz"
 PKLZ_TEMP_SUFFIX: str = ".pklz.tmp"
+FFMPEG_SLICE_TIMEOUT_SEC: float = 300.0
+FFPROBE_TIMEOUT_SEC: float = 30.0
+AUDFPRINT_BATCH_TIMEOUT_SEC: float = 7200.0
+SPLIT_TOLERANCE_SECONDS: float = 0.5
 SPLIT_MUXER_MAP: dict[str, str] = {
     ".m4a": "ipod",
     ".mp4": "mp4",

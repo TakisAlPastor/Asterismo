@@ -1,6 +1,15 @@
 """Harvester package for audio downloading, link enumeration, and open web directory crawling."""
 from __future__ import annotations
 
+from src.core.harvester.audio_splitter import (
+    AudioSplitDirectorySummary,
+    AudioSplitResult,
+    AudioSplitterCancelledError,
+    AudioSplitterError,
+    AudioSplitterService,
+    compute_split_segments,
+    format_split_piece_name,
+)
 from src.core.harvester.url_utils import (
     classify_url,
     clean_tracking_params,
@@ -24,6 +33,11 @@ from src.core.harvester.ytdlp_adapter import (
 )
 
 __all__ = [
+    "AudioSplitDirectorySummary",
+    "AudioSplitResult",
+    "AudioSplitterCancelledError",
+    "AudioSplitterError",
+    "AudioSplitterService",
     "WebCrawlerCancelledError",
     "WebCrawlerError",
     "WebCrawlerListingResult",
@@ -33,7 +47,9 @@ __all__ = [
     "YtDlpError",
     "classify_url",
     "clean_tracking_params",
+    "compute_split_segments",
     "ensure_folder_url",
+    "format_split_piece_name",
     "generate_item_key",
     "normalize_url",
     "parse_listing_date",
