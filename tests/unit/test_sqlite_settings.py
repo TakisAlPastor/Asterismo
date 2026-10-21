@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 import json
 from pathlib import Path
+import threading
 import pytest
 
 from src.core.config.constants import (
@@ -212,3 +213,89 @@ def test_database_manager_transaction_rolls_back_on_error(
     count_row = in_memory_db.query_one("SELECT count(*) as cnt FROM test_tx;")
     assert count_row is not None
     assert count_row["cnt"] == 0
+
+
+def test_database_manager_multithreaded_concurrent_access(tmp_path: Path) -> None:
+    """Verify that file-backed SQLite connections are thread-local and support concurrent threads."""
+    db_file = tmp_path / "concurrent_test.db"
+    db = DatabaseManager(db_file)
+
+    # 1. Initialize table on main thread
+    db.execute(
+        "CREATE TABLE concurrent_records (id INTEGER PRIMARY KEY, thread_id INT, payload TEXT);")
+
+    # 2. Concurrently insert and read across 8 worker threads
+    thread_count = 8
+    rows_per_thread = 5
+    errors: list[Exception] = []
+
+    def worker(worker_idx: int) -> None:
+        try:
+            for row_idx in range(rows_per_thread):
+                db.execute(
+                    "INSERT INTO concurrent_records (thread_id, payload) VALUES (?, ?);",
+                    (worker_idx, f"payload_{worker_idx}_{row_idx}"),
+                )
+                # Concurrently query
+                row = db.query_one(
+                    "SELECT count(*) as cnt FROM concurrent_records WHERE thread_id = ?;", (worker_idx,))
+                assert row is not None
+                assert row["cnt"] >= 1
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,))
+               for i in range(thread_count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Encountered thread errors: {errors}"
+
+    # Verify total rows
+    total_row = db.query_one("SELECT count(*) as cnt FROM concurrent_records;")
+    assert total_row is not None
+    assert total_row["cnt"] == thread_count * rows_per_thread
+
+    # 3. Teardown from another thread should not raise ProgrammingError
+    teardown_error: list[Exception] = []
+
+    def closer() -> None:
+        try:
+            db.close()
+        except Exception as exc:
+            teardown_error.append(exc)
+
+    t_close = threading.Thread(target=closer)
+    t_close.start()
+    t_close.join()
+    assert not teardown_error
+
+
+def test_database_manager_in_memory_multithreaded() -> None:
+    """Verify that in-memory DatabaseManager can be queried from multiple threads safely."""
+    db = DatabaseManager(MEMORY_DB_TARGET)
+    db.execute("CREATE TABLE mem_items (val INT);")
+
+    errors: list[Exception] = []
+
+    def worker(val: int) -> None:
+        try:
+            db.execute("INSERT INTO mem_items VALUES (?);", (val,))
+            res = db.query_all("SELECT val FROM mem_items;")
+            assert len(res) >= 1
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Encountered thread errors in memory DB: {errors}"
+    total = db.query_one("SELECT count(*) as cnt FROM mem_items;")
+    assert total is not None
+    assert total["cnt"] == 5
+    db.close()

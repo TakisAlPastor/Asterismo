@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 from src.core.config.constants import (
     AUDFPRINT_DEFAULT_SAMPLERATE,
 )
+
 from src.core.config.models import (
     BrowserCookieSource,
     HarvestItemRecord,
@@ -281,3 +282,47 @@ def test_m2_harvester_view_options_persistence(qapp: QApplication, tmp_path: Pat
 
     window.close()
 
+
+def test_m2_harvester_worker_qthread_execution(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify HarvesterWorker runs in a dedicated QThread without SQLite thread-affinity errors."""
+    audio_track = _generate_synthetic_wav(
+        tmp_path / "track.wav", duration_sec=2.0)
+    app, window = bootstrap_application(base_dir=tmp_path)
+    hv = window.harvester_view
+    assert hv is not None
+
+    fake_adapter = FakeMockYtDlpAdapter([audio_track])
+    hv._service._ytdlp_factory = lambda c, i: fake_adapter
+
+    # 1. Enqueue channel handle
+    hv._url_input.setText("@test_channel")
+    hv.on_add_links()
+    assert hv._queue_table.rowCount() == 1
+
+    # 2. Track errors from worker
+    errors: list[str] = []
+
+    # 3. Launch background execution in real QThread
+    hv.start_queue_harvest()
+    assert hv._worker is not None
+    assert hv._worker_thread is not None
+    hv._worker.error_occurred.connect(errors.append)
+
+    # 4. Wait for worker thread to complete execution while processing Qt events
+    import time
+    for _ in range(300):
+        qapp.processEvents()
+        if hv._worker_thread.isFinished():
+            break
+        time.sleep(0.05)
+
+    qapp.processEvents()
+    assert hv._worker_thread.isFinished(), "Worker thread timed out"
+
+    # 5. Assert no SQLite thread errors occurred and task was completed
+    assert not errors, f"HarvesterWorker failed with errors: {errors}"
+    tasks = hv._service.list_queue()
+    assert len(tasks) == 1
+    assert tasks[0].status == HarvestTaskStatus.COMPLETED
+
+    window.close()
