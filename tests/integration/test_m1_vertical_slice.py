@@ -96,6 +96,62 @@ class TestMilestone1VerticalSlice:
 
         window2.close()
 
+    def test_custom_paths_do_not_recreate_default_directories_on_reopen(
+        self, qapp: QApplication, tmp_path: Path
+    ) -> None:
+        """Verify that changing paths does not recreate default directories on subsequent launches."""
+        # 1. Bootstrap application
+        app, window = bootstrap_application(base_dir=tmp_path)
+        settings_view = window.settings_view
+
+        # 2. Configure custom directories
+        custom_input = tmp_path / "custom_input"
+        custom_archive = tmp_path / "custom_archive"
+        custom_output = tmp_path / "custom_output"
+        settings_view._input_dir_edit.setText(str(custom_input))
+        settings_view._archive_dir_edit.setText(str(custom_archive))
+        settings_view._output_dir_edit.setText(str(custom_output))
+
+        # Save settings and close
+        settings_view.save_data()
+        window.close()
+
+        # Custom directories should now exist because save_data ensures them
+        assert custom_input.is_dir()
+        assert custom_archive.is_dir()
+        assert custom_output.is_dir()
+
+        # 3. Clean up the default directories that were created during initial bootstrap
+        default_input = tmp_path / "input"
+        default_archive = tmp_path / "archive"
+        default_output = tmp_path / "output"
+
+        if default_input.exists():
+            default_input.rmdir()
+        if default_archive.exists():
+            default_archive.rmdir()
+        if default_output.exists():
+            default_output.rmdir()
+
+        assert not default_input.exists()
+        assert not default_archive.exists()
+        assert not default_output.exists()
+
+        # 4. Reopen application
+        app2, window2 = bootstrap_application(base_dir=tmp_path)
+
+        # 5. Assert default directories were NOT recreated
+        assert not default_input.exists(), "Default input dir was recreated unexpectedly"
+        assert not default_archive.exists(), "Default archive dir was recreated unexpectedly"
+        assert not default_output.exists(), "Default output dir was recreated unexpectedly"
+
+        # 6. Assert custom directories are maintained
+        assert custom_input.is_dir()
+        assert custom_archive.is_dir()
+        assert custom_output.is_dir()
+
+        window2.close()
+
     def test_dependency_doctor_modal_diagnostics(self, qapp: QApplication, tmp_path: Path) -> None:
         # Arrange
         app, window = bootstrap_application(base_dir=tmp_path)

@@ -43,6 +43,26 @@ def test_workspace_paths_default_and_roundtrip(tmp_path: Path) -> None:
     assert restored == paths
 
 
+def test_workspace_paths_ensure_directories(tmp_path: Path) -> None:
+    """Verify that ensure_directories creates all configured folders on disk."""
+    base_dir = tmp_path / "custom_root"
+    paths = WorkspacePaths(
+        input_dir=base_dir / "my_in",
+        db_dir=base_dir / "my_db",
+        output_dir=base_dir / "my_out",
+        logs_dir=base_dir / "my_logs",
+        bin_dir=base_dir / "my_bin",
+        archive_dir=base_dir / "my_archive",
+    )
+    for p in (paths.input_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir, paths.archive_dir):
+        assert not p.exists()
+
+    paths.ensure_directories()
+
+    for p in (paths.input_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir, paths.archive_dir):
+        assert p.is_dir()
+
+
 def test_app_settings_default_and_roundtrip(tmp_path: Path) -> None:
     """Verify default settings initialization and JSON roundtrip."""
     # Arrange

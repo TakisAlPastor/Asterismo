@@ -132,6 +132,18 @@ class WorkspacePaths:
             bin_dir=resolved / BIN_DIRNAME,
         )
 
+    def ensure_directories(self) -> None:
+        """Ensure all configured workspace directories exist on disk."""
+        for path in (
+            self.input_dir,
+            self.archive_dir,
+            self.db_dir,
+            self.output_dir,
+            self.logs_dir,
+            self.bin_dir,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
     def to_dict(self) -> dict[str, str]:
         """Serialize paths to string dictionary."""
         return {

@@ -19,6 +19,11 @@ class BinaryLocator:
         """Configured local binary directory."""
         return self._bin_dir
 
+    @bin_dir.setter
+    def bin_dir(self, new_dir: Path | None) -> None:
+        """Update configured local binary directory."""
+        self._bin_dir = new_dir.resolve() if new_dir else None
+
     def locate(self, binary_name: str) -> Path | None:
         """Find the absolute path to an executable binary.
 

@@ -31,26 +31,25 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
     if base_dir is None:
         base_dir = Path(__file__).resolve().parent.parent
 
-    # 1. Initialize default workspace paths and ensure directories exist
-    paths = WorkspacePaths.default(base_dir)
-    for p in (paths.input_dir, paths.archive_dir, paths.db_dir, paths.output_dir, paths.logs_dir, paths.bin_dir):
-        p.mkdir(parents=True, exist_ok=True)
-
-    # 2. Initialize Database and run migrations (V1, V2)
-    db_file = paths.db_dir / STATE_DB_FILENAME
+    # 1. Initialize Database and run migrations (V1, V2)
+    default_paths = WorkspacePaths.default(base_dir)
+    db_file = default_paths.db_dir / STATE_DB_FILENAME
     db_manager = DatabaseManager(db_file)
     migration_manager = MigrationManager(db_manager)
     migration_manager.apply_all()
 
-    # 3. Instantiate repositories and services
+    # 2. Instantiate repositories and load application settings
     settings_repo = SettingsRepository(db=db_manager, base_dir=base_dir)
     harvest_repo = HarvestRepository(db=db_manager)
     catalog_repo = CatalogRepository(db=db_manager)
     secrets_store = SecretsStore(base_dir / SECRETS_FILENAME)
     app_settings = settings_repo.load()
 
+    # 3. Ensure configured active workspace directories exist
+    app_settings.paths.ensure_directories()
+
     process_runner = SilentProcessRunner()
-    binary_locator = BinaryLocator(bin_dir=paths.bin_dir)
+    binary_locator = BinaryLocator(bin_dir=app_settings.paths.bin_dir)
     doctor_service = DependencyDoctorService(
         binary_locator=binary_locator,
         process_runner=process_runner,

@@ -197,10 +197,12 @@ class MainWindow(QMainWindow):
 
     @Slot(AppSettings)
     def on_settings_saved(self, settings: AppSettings) -> None:
-        """Apply theme updates dynamically when settings are saved."""
+        """Apply theme updates and runtime settings dynamically when settings are saved."""
         app = QApplication.instance()
         if app:
             app.setStyleSheet(build_stylesheet(settings.theme))
+        if self._doctor_service and self._doctor_service.binary_locator:
+            self._doctor_service.binary_locator.bin_dir = settings.paths.bin_dir
         self._status_bar.showMessage("Settings saved successfully.", 3000)
 
     def closeEvent(self, event: QCloseEvent) -> None:

@@ -309,7 +309,8 @@ class SettingsView(QWidget):
             discord_webhook_url=self._discord_edit.text().strip(),
         )
 
-        # Persist
+        # Persist and ensure directories
+        paths.ensure_directories()
         self._settings_repo.save(settings)
         self._secrets_store.save(secrets)
 
