@@ -6,7 +6,12 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
-from src.core.config.constants import APP_NAME, SECRETS_FILENAME, STATE_DB_FILENAME
+from src.core.config.constants import (
+    APP_NAME,
+    SECRETS_FILENAME,
+    STATE_DB_FILENAME,
+    STATE_DIRNAME,
+)
 from src.core.config.models import WorkspacePaths
 
 from src.core.config.secrets_store import SecretsStore
@@ -32,8 +37,9 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         base_dir = Path(__file__).resolve().parent.parent
 
     # 1. Initialize Database and run migrations (V1, V2)
-    default_paths = WorkspacePaths.default(base_dir)
-    db_file = default_paths.db_dir / STATE_DB_FILENAME
+    state_dir = base_dir.resolve() / STATE_DIRNAME
+    db_file = state_dir / STATE_DB_FILENAME
+
     db_manager = DatabaseManager(db_file)
     migration_manager = MigrationManager(db_manager)
     migration_manager.apply_all()

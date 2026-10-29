@@ -104,15 +104,15 @@ class SettingsView(QWidget):
         self._input_dir_edit = self._create_path_row(
             "Input Audio Folder:", 0, paths_grid, paths_card)
         self._db_dir_edit = self._create_path_row(
-            "Database (.pklz) Folder:", 1, paths_grid, paths_card)
+            "Fingerprint (.pklz) Catalog Folder:", 1, paths_grid, paths_card)
         self._output_dir_edit = self._create_path_row(
             "Output Results Folder:", 2, paths_grid, paths_card)
         self._logs_dir_edit = self._create_path_row(
             "Application Logs Folder:", 3, paths_grid, paths_card)
-        self._bin_dir_edit = self._create_path_row(
-            "Local Binaries Folder:", 4, paths_grid, paths_card)
+
+
         self._archive_dir_edit = self._create_path_row(
-            "Harvested Audio Archive Folder:", 5, paths_grid, paths_card)
+            "Harvested Audio Archive Folder:", 4, paths_grid, paths_card)
 
         paths_layout.addLayout(paths_grid)
         container_layout.addWidget(paths_card)
@@ -269,7 +269,7 @@ class SettingsView(QWidget):
         self._db_dir_edit.setText(str(settings.paths.db_dir))
         self._output_dir_edit.setText(str(settings.paths.output_dir))
         self._logs_dir_edit.setText(str(settings.paths.logs_dir))
-        self._bin_dir_edit.setText(str(settings.paths.bin_dir))
+
         self._archive_dir_edit.setText(str(settings.paths.archive_dir))
 
         self._theme_combo.setCurrentText(settings.theme.value)
@@ -290,7 +290,7 @@ class SettingsView(QWidget):
             db_dir=Path(self._db_dir_edit.text().strip()),
             output_dir=Path(self._output_dir_edit.text().strip()),
             logs_dir=Path(self._logs_dir_edit.text().strip()),
-            bin_dir=Path(self._bin_dir_edit.text().strip()),
+            bin_dir=current.paths.bin_dir,
             archive_dir=Path(self._archive_dir_edit.text().strip()),
         )
 
@@ -326,7 +326,7 @@ class SettingsView(QWidget):
         self._db_dir_edit.setText(str(defaults.paths.db_dir))
         self._output_dir_edit.setText(str(defaults.paths.output_dir))
         self._logs_dir_edit.setText(str(defaults.paths.logs_dir))
-        self._bin_dir_edit.setText(str(defaults.paths.bin_dir))
+
         self._archive_dir_edit.setText(str(defaults.paths.archive_dir))
 
         self._theme_combo.setCurrentText(defaults.theme.value)

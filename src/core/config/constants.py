@@ -8,6 +8,7 @@ APP_VERSION: str = "0.1.0"
 MIN_PYTHON_VERSION: tuple[int, int] = (3, 12)
 
 # File and directory names
+STATE_DIRNAME: str = ".state"
 STATE_DB_FILENAME: str = "asterismo_state.db"
 SECRETS_FILENAME: str = ".secrets.json"
 SECRETS_TEMP_SUFFIX: str = ".secrets.json.tmp"

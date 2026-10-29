@@ -44,6 +44,9 @@ class TestMilestone1VerticalSlice:
         assert window.view_stack.count() == 4
         assert window.log_console is not None
         assert "Asterismo desktop shell initialized." in window.log_console.get_text()
+        assert (tmp_path / ".state" / "asterismo_state.db").is_file()
+        assert not (tmp_path / "databases" / "asterismo_state.db").exists()
+        assert not hasattr(window.settings_view, "_bin_dir_edit")
 
         # Switch to each view index and ensure no exceptions
         for idx in range(4):

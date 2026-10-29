@@ -165,7 +165,7 @@ class WorkspacePaths:
             db_dir=Path(data.get("db_dir", defaults.db_dir)),
             output_dir=Path(data.get("output_dir", defaults.output_dir)),
             logs_dir=Path(data.get("logs_dir", defaults.logs_dir)),
-            bin_dir=Path(data.get("bin_dir", defaults.bin_dir)),
+            bin_dir=defaults.bin_dir,
         )
 
 

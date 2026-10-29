@@ -43,6 +43,21 @@ def test_workspace_paths_default_and_roundtrip(tmp_path: Path) -> None:
     assert restored == paths
 
 
+def test_workspace_paths_locks_bin_dir_on_deserialization(tmp_path: Path) -> None:
+    """Verify that bin_dir cannot be overridden via serialized dictionary payloads."""
+    base_dir = tmp_path / "app_root"
+    spoofed_data = {
+        "input_dir": str(tmp_path / "custom_in"),
+        "archive_dir": str(tmp_path / "custom_arch"),
+        "db_dir": str(tmp_path / "custom_db"),
+        "output_dir": str(tmp_path / "custom_out"),
+        "logs_dir": str(tmp_path / "custom_logs"),
+        "bin_dir": str(tmp_path / "hijacked_bin"),
+    }
+    restored = WorkspacePaths.from_dict(spoofed_data, base_dir=base_dir)
+    assert restored.bin_dir == base_dir.resolve() / "bin"
+
+
 def test_workspace_paths_ensure_directories(tmp_path: Path) -> None:
     """Verify that ensure_directories creates all configured folders on disk."""
     base_dir = tmp_path / "custom_root"
