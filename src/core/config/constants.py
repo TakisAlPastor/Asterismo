@@ -45,6 +45,22 @@ MIGRATION_V1_VERSION: int = 1
 MIGRATION_V1_NAME: str = "001_initial_app_settings"
 MIGRATION_V2_VERSION: int = 2
 MIGRATION_V2_NAME: str = "002_milestone2_harvester_and_catalog"
+MIGRATION_V3_VERSION: int = 3
+MIGRATION_V3_NAME: str = "003_scan_candidates_and_matches"
+
+# Local Matcher & Candidate Scanning Constants
+LOCAL_MATCH_MIN_HASH_THRESHOLD: int = 5
+LOCAL_MATCH_EARLY_STOP_THRESHOLD: int = 15
+AUDIO_EXTENSIONS_SUPPORTED: tuple[str, ...] = (
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".flac",
+    ".m4a",
+    ".aac",
+    ".opus",
+    ".wma",
+)
 
 # Harvester & Web Crawler Constants
 MAX_QUEUE_LINKS: int = 1000

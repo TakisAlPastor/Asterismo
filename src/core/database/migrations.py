@@ -12,6 +12,8 @@ from src.core.config.constants import (
     MIGRATION_V1_VERSION,
     MIGRATION_V2_NAME,
     MIGRATION_V2_VERSION,
+    MIGRATION_V3_NAME,
+    MIGRATION_V3_VERSION,
 )
 from src.core.database.connection import DatabaseError, DatabaseManager
 
@@ -106,7 +108,54 @@ MIGRATION_V2 = Migration(
     """,
 )
 
-ALL_MIGRATIONS: tuple[Migration, ...] = (MIGRATION_V1, MIGRATION_V2)
+# V3: Scan candidates and matches
+MIGRATION_V3 = Migration(
+    version=MIGRATION_V3_VERSION,
+    name=MIGRATION_V3_NAME,
+    up_sql="""
+    CREATE TABLE IF NOT EXISTS scan_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL UNIQUE,
+        file_name TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        file_size_bytes INTEGER NOT NULL,
+        duration_seconds REAL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        quick_scanned_at TEXT,
+        long_scanned_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scan_candidates_status ON scan_candidates(status);
+
+    CREATE TABLE IF NOT EXISTS scan_matches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        candidate_id INTEGER NOT NULL,
+        engine TEXT NOT NULL DEFAULT 'audfprint',
+        matched_track TEXT NOT NULL,
+        matched_database TEXT NOT NULL,
+        aligned_hashes INTEGER NOT NULL DEFAULT 0,
+        raw_hashes INTEGER NOT NULL DEFAULT 0,
+        offset_seconds REAL NOT NULL DEFAULT 0.0,
+        confidence REAL NOT NULL DEFAULT 0.0,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        matched_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (candidate_id) REFERENCES scan_candidates(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scan_matches_candidate ON scan_matches(candidate_id);
+    """,
+    down_sql="""
+    DROP INDEX IF EXISTS idx_scan_matches_candidate;
+    DROP TABLE IF EXISTS scan_matches;
+    DROP INDEX IF EXISTS idx_scan_candidates_status;
+    DROP TABLE IF EXISTS scan_candidates;
+    """,
+)
+
+ALL_MIGRATIONS: tuple[Migration, ...] = (
+    MIGRATION_V1, MIGRATION_V2, MIGRATION_V3)
 
 
 class MigrationManager:

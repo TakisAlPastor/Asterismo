@@ -6,6 +6,11 @@ from pathlib import Path
 import pytest
 
 from src.core.config.constants import (
+    AUDIO_EXTENSIONS_SUPPORTED,
+    LOCAL_MATCH_EARLY_STOP_THRESHOLD,
+    LOCAL_MATCH_MIN_HASH_THRESHOLD,
+    MIGRATION_V3_NAME,
+    MIGRATION_V3_VERSION,
     DEFAULT_FP_WORKER_COUNT,
     DEFAULT_MAX_CONCURRENT_DOWNLOADS,
     DEFAULT_SPLIT_SEGMENT_SECONDS,
@@ -13,6 +18,11 @@ from src.core.config.constants import (
     REDACTED_SECRET_PLACEHOLDER,
 )
 from src.core.config.models import (
+    LocalMatchResult,
+    MatchOptions,
+    ScanCandidateRecord,
+    ScanCandidateStatus,
+    ScanMatchRecord,
     AppSettings,
     ConfigurationError,
     ScanMode,
@@ -227,3 +237,125 @@ def test_secrets_store_raises_configuration_error_on_corrupt_json(tmp_path: Path
     secrets_file.write_text(json.dumps(["not", "a", "dict"]), encoding="utf-8")
     with pytest.raises(ConfigurationError, match="expected JSON object"):
         store.load()
+
+
+def test_milestone3_constants_defined() -> None:
+    """Verify Milestone 3 constants, thresholds, and migration tokens."""
+    assert MIGRATION_V3_VERSION == 3
+    assert MIGRATION_V3_NAME == "003_scan_candidates_and_matches"
+    assert LOCAL_MATCH_MIN_HASH_THRESHOLD == 5
+    assert LOCAL_MATCH_EARLY_STOP_THRESHOLD == 15
+    assert ".mp3" in AUDIO_EXTENSIONS_SUPPORTED
+    assert ".flac" in AUDIO_EXTENSIONS_SUPPORTED
+
+
+def test_scan_candidate_record_validation(tmp_path: Path) -> None:
+    """Verify validation and attributes of ScanCandidateRecord."""
+    valid_path = tmp_path / "song.mp3"
+    rec = ScanCandidateRecord(
+        file_path=valid_path,
+        file_name="song.mp3",
+        relative_path="lostwave/song.mp3",
+        file_size_bytes=1024,
+        duration_seconds=180.5,
+        status=ScanCandidateStatus.PENDING,
+    )
+    assert rec.file_name == "song.mp3"
+    assert rec.status == ScanCandidateStatus.PENDING
+    assert rec.duration_seconds == 180.5
+
+    # Validation errors
+    with pytest.raises(ConfigurationError, match="file_path cannot be empty"):
+        ScanCandidateRecord(
+            file_path=Path(""),
+            file_name="s.mp3",
+            relative_path="s.mp3",
+            file_size_bytes=10,
+        )
+
+    with pytest.raises(ConfigurationError, match="file_size_bytes must be >= 0"):
+        ScanCandidateRecord(
+            file_path=valid_path,
+            file_name="s.mp3",
+            relative_path="s.mp3",
+            file_size_bytes=-1,
+        )
+
+    with pytest.raises(ConfigurationError, match="duration_seconds must be >= 0"):
+        ScanCandidateRecord(
+            file_path=valid_path,
+            file_name="s.mp3",
+            relative_path="s.mp3",
+            file_size_bytes=10,
+            duration_seconds=-5.0,
+        )
+
+
+def test_scan_match_record_validation() -> None:
+    """Verify validation and attributes of ScanMatchRecord."""
+    match = ScanMatchRecord(
+        candidate_id=1,
+        matched_track="Lost Track 1984",
+        matched_database="commercials.pklz",
+        aligned_hashes=12,
+        raw_hashes=45,
+        offset_seconds=14.2,
+        confidence=0.85,
+    )
+    assert match.candidate_id == 1
+    assert match.aligned_hashes == 12
+    assert match.matched_track == "Lost Track 1984"
+
+    # Validation errors
+    with pytest.raises(ConfigurationError, match="candidate_id must be >= 1"):
+        ScanMatchRecord(
+            candidate_id=0,
+            matched_track="Test",
+            matched_database="db.pklz",
+        )
+
+    with pytest.raises(ConfigurationError, match="matched_track cannot be empty"):
+        ScanMatchRecord(
+            candidate_id=1,
+            matched_track="",
+            matched_database="db.pklz",
+        )
+
+    with pytest.raises(ConfigurationError, match="aligned_hashes must be >= 0"):
+        ScanMatchRecord(
+            candidate_id=1,
+            matched_track="Test",
+            matched_database="db.pklz",
+            aligned_hashes=-1,
+        )
+
+
+def test_local_match_result_and_options(tmp_path: Path) -> None:
+    """Verify LocalMatchResult and MatchOptions validation."""
+    audio_path = tmp_path / "query.mp3"
+    db_path = tmp_path / "reference.pklz"
+
+    options = MatchOptions(
+        target_databases=(db_path,),
+        stop_on_first_match=True,
+        min_aligned_hashes=5,
+        early_stop_threshold=15,
+    )
+    assert options.stop_on_first_match is True
+    assert len(options.target_databases) == 1
+
+    with pytest.raises(ConfigurationError, match="min_aligned_hashes must be >= 1"):
+        MatchOptions(min_aligned_hashes=0)
+
+    with pytest.raises(ConfigurationError, match="early_stop_threshold"):
+        MatchOptions(min_aligned_hashes=20, early_stop_threshold=10)
+
+    result = LocalMatchResult(
+        candidate_path=audio_path,
+        candidate_id=5,
+        databases_searched=3,
+        elapsed_seconds=1.25,
+        early_stopped=True,
+    )
+    assert result.candidate_id == 5
+    assert result.early_stopped is True

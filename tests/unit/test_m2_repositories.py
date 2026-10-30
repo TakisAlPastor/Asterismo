@@ -10,6 +10,7 @@ from src.core.config.constants import (
     MEMORY_DB_TARGET,
     MIGRATION_V1_VERSION,
     MIGRATION_V2_VERSION,
+    MIGRATION_V3_VERSION,
 )
 from src.core.config.models import (
     AppSettings,
@@ -33,6 +34,7 @@ from src.core.database.migrations import (
     ALL_MIGRATIONS,
     MIGRATION_V1,
     MIGRATION_V2,
+    MIGRATION_V3,
     MigrationManager,
 )
 from src.core.database.settings_repository import SettingsRepository
@@ -79,7 +81,8 @@ def test_app_settings_v2_fields_backward_compatibility(tmp_path: Path) -> None:
 def test_migration_v2_apply_and_rollback_to_v1(in_memory_db: DatabaseManager) -> None:
     """Verify applying V1 and V2 migrations, table creation, and selective rollback to V1."""
     # Arrange
-    manager = MigrationManager(in_memory_db, migrations=ALL_MIGRATIONS)
+    manager = MigrationManager(
+        in_memory_db, migrations=(MIGRATION_V1, MIGRATION_V2))
 
     # Act 1: Apply all migrations (V1 + V2)
     applied = manager.apply_all()
@@ -341,3 +344,31 @@ def test_repositories_sql_injection_prevented(
             (table_name,),
         )
         assert row is not None and row["cnt"] == 1
+
+
+def test_migration_v3_apply_and_rollback_to_v2(in_memory_db: DatabaseManager) -> None:
+    """Verify applying all migrations including V3, creating scan tables, and rollback to V2."""
+    manager = MigrationManager(in_memory_db, migrations=ALL_MIGRATIONS)
+    applied = manager.apply_all()
+    assert applied == 3
+    assert manager.current_version() == MIGRATION_V3_VERSION
+
+    # Assert: scan tables exist
+    for table_name in ("scan_candidates", "scan_matches"):
+        row = in_memory_db.query_one(
+            "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name=?;",
+            (table_name,),
+        )
+        assert row is not None and row["cnt"] == 1, f"Table {table_name} missing"
+
+    # Rollback to V2
+    rolled_back = manager.rollback_to(MIGRATION_V2_VERSION)
+    assert rolled_back == 1
+    assert manager.current_version() == MIGRATION_V2_VERSION
+
+    for table_name in ("scan_candidates", "scan_matches"):
+        row = in_memory_db.query_one(
+            "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name=?;",
+            (table_name,),
+        )
+        assert row is not None and row["cnt"] == 0, f"Table {table_name} was not dropped"

@@ -20,6 +20,8 @@ from src.core.config.constants import (
     BIN_DIRNAME,
     MIN_POSITIVE_INT,
     REDACTED_SECRET_PLACEHOLDER,
+    LOCAL_MATCH_MIN_HASH_THRESHOLD,
+    LOCAL_MATCH_EARLY_STOP_THRESHOLD,
 )
 
 
@@ -438,7 +440,7 @@ class PklzCatalogEntry:
 
     def __post_init__(self) -> None:
         """Validate positive counts and hash string."""
-        if not str(self.file_path).strip():
+        if not str(self.file_path).strip() or not self.file_path.name:
             raise ConfigurationError("file_path cannot be empty")
         if not self.file_name.strip():
             raise ConfigurationError("file_name cannot be empty")
@@ -456,3 +458,125 @@ class PklzCatalogEntry:
         if self.file_size_bytes < 0:
             raise ConfigurationError(
                 f"file_size_bytes must be >= 0, got {self.file_size_bytes}")
+
+
+class ScanCandidateStatus(StrEnum):
+    """Lifecycle status for an audio candidate file."""
+
+    PENDING = "pending"
+    SCANNED = "scanned"
+    MISSING = "missing"
+
+
+@dataclass(frozen=True, slots=True)
+class ScanCandidateRecord:
+    """Represents a candidate audio track on disk with identification scan history."""
+
+    file_path: Path
+    file_name: str
+    relative_path: str
+    file_size_bytes: int
+    duration_seconds: float | None = None
+    status: ScanCandidateStatus = ScanCandidateStatus.PENDING
+    quick_scanned_at: str | None = None
+    long_scanned_at: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate paths and numbers."""
+        if not str(self.file_path).strip() or str(self.file_path) == ".":
+            raise ConfigurationError("file_path cannot be empty")
+        if not self.file_name.strip():
+            raise ConfigurationError("file_name cannot be empty")
+        if not self.relative_path.strip():
+            raise ConfigurationError("relative_path cannot be empty")
+        if self.file_size_bytes < 0:
+            raise ConfigurationError(
+                f"file_size_bytes must be >= 0, got {self.file_size_bytes}"
+            )
+        if self.duration_seconds is not None and self.duration_seconds < 0:
+            raise ConfigurationError(
+                f"duration_seconds must be >= 0, got {self.duration_seconds}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ScanMatchRecord:
+    """Represents a single acoustic fingerprint or recognition hit for a candidate."""
+
+    candidate_id: int
+    matched_track: str
+    matched_database: str
+    engine: str = "audfprint"
+    aligned_hashes: int = 0
+    raw_hashes: int = 0
+    offset_seconds: float = 0.0
+    confidence: float = 0.0
+    details_json: str = "{}"
+    matched_at: str = ""
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        """Validate identifiers and counts."""
+        if self.candidate_id < 1:
+            raise ConfigurationError(
+                f"candidate_id must be >= 1, got {self.candidate_id}"
+            )
+        if not self.matched_track.strip():
+            raise ConfigurationError("matched_track cannot be empty")
+        if not self.matched_database.strip():
+            raise ConfigurationError("matched_database cannot be empty")
+        if self.aligned_hashes < 0:
+            raise ConfigurationError(
+                f"aligned_hashes must be >= 0, got {self.aligned_hashes}"
+            )
+        if self.raw_hashes < 0:
+            raise ConfigurationError(
+                f"raw_hashes must be >= 0, got {self.raw_hashes}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalMatchResult:
+    """Aggregated result of matching a single candidate file against target databases."""
+
+    candidate_path: Path
+    candidate_id: int | None = None
+    matches: tuple[ScanMatchRecord, ...] = ()
+    databases_searched: int = 0
+    elapsed_seconds: float = 0.0
+    early_stopped: bool = False
+
+    def __post_init__(self) -> None:
+        if not str(self.candidate_path).strip() or not self.candidate_path.name:
+            raise ConfigurationError("candidate_path cannot be empty")
+        if self.databases_searched < 0:
+            raise ConfigurationError(
+                f"databases_searched must be >= 0, got {self.databases_searched}"
+            )
+        if self.elapsed_seconds < 0:
+            raise ConfigurationError(
+                f"elapsed_seconds must be >= 0, got {self.elapsed_seconds}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class MatchOptions:
+    """Runtime options for the local acoustic matcher."""
+
+    target_databases: tuple[Path, ...] = ()
+    stop_on_first_match: bool = False
+    min_aligned_hashes: int = LOCAL_MATCH_MIN_HASH_THRESHOLD
+    early_stop_threshold: int = LOCAL_MATCH_EARLY_STOP_THRESHOLD
+
+    def __post_init__(self) -> None:
+        if self.min_aligned_hashes < 1:
+            raise ConfigurationError(
+                f"min_aligned_hashes must be >= 1, got {self.min_aligned_hashes}"
+            )
+        if self.early_stop_threshold < self.min_aligned_hashes:
+            raise ConfigurationError(
+                f"early_stop_threshold ({self.early_stop_threshold}) must be >= min_aligned_hashes ({self.min_aligned_hashes})"
+            )
