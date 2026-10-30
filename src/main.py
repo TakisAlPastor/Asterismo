@@ -21,6 +21,7 @@ from src.core.database.catalog_repository import CatalogRepository
 from src.core.database.migrations import MigrationManager
 from src.core.database.settings_repository import SettingsRepository
 from src.core.fingerprinter.builder import FingerprintBuilderService
+from src.core.fingerprinter.catalog_service import CatalogService
 from src.core.harvester.audio_splitter import AudioSplitterService
 from src.core.harvester.service import HarvesterService
 from src.core.harvester.web_crawler import WebDirectoryCrawler
@@ -80,6 +81,10 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         builder=builder_service,
         crawler=web_crawler,
     )
+    catalog_service = CatalogService(
+        catalog_repo=catalog_repo,
+        builder=builder_service,
+    )
 
     # 4. Initialize Qt Application
     app = QApplication.instance()
@@ -96,6 +101,7 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         doctor_service=doctor_service,
         process_runner=process_runner,
         harvester_service=harvester_service,
+        catalog_service=catalog_service,
     )
 
     return app, window

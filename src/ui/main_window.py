@@ -34,8 +34,10 @@ from src.ui.theme import (
     WINDOW_MIN_WIDTH,
     build_stylesheet,
 )
+from src.ui.views.database_catalog_view import DatabaseCatalogView
 from src.ui.views.harvester_view import HarvesterView
 from src.ui.views.settings_view import SettingsView
+from src.core.fingerprinter.catalog_service import CatalogService
 from src.core.harvester.service import HarvesterService
 
 
@@ -50,6 +52,7 @@ class MainWindow(QMainWindow):
         doctor_service: DependencyDoctorService,
         process_runner: SilentProcessRunner,
         harvester_service: HarvesterService | None = None,
+        catalog_service: CatalogService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -59,6 +62,7 @@ class MainWindow(QMainWindow):
         self._doctor_service = doctor_service
         self._process_runner = process_runner
         self._harvester_service = harvester_service
+        self._catalog_service = catalog_service
 
         self._init_window()
         self._init_layout()
@@ -113,10 +117,22 @@ class MainWindow(QMainWindow):
             )
             self._view_stack.addWidget(self._harvester_placeholder)
 
-        self._catalog_placeholder = self._create_placeholder(
-            "Database Catalog (Milestone 3)",
-            "Searchable .pklz fingerprint database inspection and subset selection.",
-        )
+        if self._catalog_service is not None:
+            self._catalog_view = DatabaseCatalogView(
+                catalog_service=self._catalog_service,
+                settings_repo=self._settings_repo,
+                parent=self._view_stack,
+            )
+            self._catalog_placeholder = None
+            self._view_stack.addWidget(self._catalog_view)
+        else:
+            self._catalog_view = None
+            self._catalog_placeholder = self._create_placeholder(
+                "Database Catalog (Milestone 3)",
+                "Searchable .pklz fingerprint database inspection and subset selection.",
+            )
+            self._view_stack.addWidget(self._catalog_placeholder)
+
         self._scanner_placeholder = self._create_placeholder(
             "Multi-Engine Scanner (Milestone 3/4)",
             "Local audfprint matching + Cloud Shazam/AcoustID/AudioTag recognition.",
@@ -131,7 +147,6 @@ class MainWindow(QMainWindow):
             parent=self._view_stack,
         )
 
-        self._view_stack.addWidget(self._catalog_placeholder)
         self._view_stack.addWidget(self._scanner_placeholder)
         self._view_stack.addWidget(self._settings_view)
 
@@ -181,6 +196,13 @@ class MainWindow(QMainWindow):
         self._settings_view.settings_saved.connect(self.on_settings_saved)
         self._settings_view.log_requested.connect(self._log_console.append_log)
 
+        if self._catalog_view is not None:
+            self._catalog_view.log_requested.connect(
+                self._log_console.append_log)
+            if self._harvester_view is not None:
+                self._harvester_view.catalog_updated.connect(
+                    self._catalog_view.refresh_catalog)
+
         if self._harvester_view is not None:
             self._harvester_view.log_requested.connect(
                 self._log_console.append_log)
@@ -215,6 +237,10 @@ class MainWindow(QMainWindow):
     @property
     def log_console(self) -> LogConsole:
         return self._log_console
+
+    @property
+    def catalog_view(self) -> DatabaseCatalogView | None:
+        return self._catalog_view
 
     @property
     def harvester_view(self) -> HarvesterView | None:
