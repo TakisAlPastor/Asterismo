@@ -369,3 +369,45 @@ def test_inspect_hashtable_in_memory(tmp_path: Path) -> None:
     assert stats.maxtime == 16384
     assert stats.file_size_bytes == 4
     assert len(stats.sha256_hash) == 64
+
+
+def test_builder_uses_tempfile_work_dir_and_cleans_up(tmp_path: Path) -> None:
+    """Verify default work_dir uses tempfile and leaves no .work directory in output_dir."""
+    mock_runner = MagicMock(spec=SilentProcessRunner)
+    mock_locator = MagicMock(spec=BinaryLocator)
+    service = FingerprintBuilderService(runner=mock_runner, locator=mock_locator)
+
+    output_dir = tmp_path / "databases"
+    output_dir.mkdir()
+    audio = tmp_path / "track.wav"
+    audio.write_bytes(b"RIFF")
+
+    with patch.object(service, "build_batch_inprocess") as mock_inprocess:
+        target_pklz = output_dir / "test-1.pklz"
+        target_pklz.write_bytes(b"PKLZ")
+        mock_inprocess.return_value = (target_pklz, [], None)
+
+        with patch.object(service, "inspect_pklz") as mock_inspect:
+            mock_inspect.return_value = PklzInspectionStats(
+                file_path=target_pklz,
+                track_count=1,
+                total_hashes=10,
+                stored_hashes=10,
+                dropped_hashes=0,
+                dropped_percent=0.0,
+                sample_rate=11025,
+                hashbits=20,
+                bucketsize=100,
+                maxtime=16384,
+                file_size_bytes=4,
+                sha256_hash="abc",
+            )
+            results = service.build_batches(
+                audio_files=[audio],
+                output_dir=output_dir,
+                archive_prefix="test",
+            )
+
+    assert len(results) == 1
+    # Verify .work was NOT created in output_dir
+    assert not (output_dir / ".work").exists()

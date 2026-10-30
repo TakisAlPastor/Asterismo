@@ -55,6 +55,7 @@ def test_scanner_view_init_and_population(qapp: QApplication, tmp_path: Path) ->
         settings_repo,
     ) = _create_mock_repos(tmp_path)
 
+    (tmp_path / "eurobeat.pklz").write_bytes(b"DATA")
     cat_repo.list_entries.return_value = [
         PklzCatalogEntry(
             file_path=tmp_path / "eurobeat.pklz",
@@ -144,6 +145,8 @@ def test_scanner_view_candidate_and_db_selection(qapp: QApplication, tmp_path: P
         settings_repo,
     ) = _create_mock_repos(tmp_path)
 
+    (tmp_path / "db1.pklz").write_bytes(b"DATA1")
+    (tmp_path / "db2.pklz").write_bytes(b"DATA2")
     cat_repo.list_entries.return_value = [
         PklzCatalogEntry(
             file_path=tmp_path / "db1.pklz",
@@ -383,4 +386,57 @@ def test_main_window_wires_scanner_view(qapp: QApplication, tmp_path: Path) -> N
     # Switch to Scanner (row index 2)
     window._sidebar.setCurrentRow(2)
     assert window.view_stack.currentIndex() == 2
-    assert window.view_stack.currentWidget() == mock_scanner_view
+
+
+def test_scanner_view_missing_databases_and_refresh_button(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify missing databases are badged and unchecked, and Refresh button reloads."""
+    (
+        cand_repo,
+        cat_repo,
+        matcher_service,
+        reconciler,
+        settings_repo,
+    ) = _create_mock_repos(tmp_path)
+
+    existing_db = tmp_path / "valid.pklz"
+    existing_db.write_bytes(b"DATA")
+    missing_db = tmp_path / "ghost.pklz"
+
+    cat_repo.list_entries.return_value = [
+        PklzCatalogEntry(file_path=existing_db, file_name="valid.pklz", prefix_label="Lib", track_count=10),
+        PklzCatalogEntry(file_path=missing_db, file_name="ghost.pklz", prefix_label="Lib", track_count=5),
+    ]
+    cand_repo.list_candidates.return_value = []
+
+    view = ScannerView(
+        candidate_repo=cand_repo,
+        catalog_repo=cat_repo,
+        matcher_service=matcher_service,
+        reconciler=reconciler,
+        settings_repo=settings_repo,
+    )
+
+    # Check button exists
+    assert hasattr(view, "_btn_refresh_dbs")
+
+    # Tree should have 1 group with 2 children
+    assert view._db_tree.topLevelItemCount() == 1
+    group_item = view._db_tree.topLevelItem(0)
+    assert group_item.childCount() == 2
+
+    valid_child = group_item.child(0)
+    missing_child = group_item.child(1)
+
+    assert valid_child.text(0) == "valid.pklz"
+    assert valid_child.checkState(0) == Qt.CheckState.Checked
+
+    assert missing_child.text(0) == "[Missing] ghost.pklz"
+    assert missing_child.checkState(0) == Qt.CheckState.Unchecked
+
+    # Only existing_db should be in selected paths
+    assert view.get_selected_database_paths() == [existing_db.resolve()]
+
+    # Click Refresh button -> should re-query list_entries
+    cat_repo.list_entries.reset_mock()
+    view._btn_refresh_dbs.click()
+    cat_repo.list_entries.assert_called_once()

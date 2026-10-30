@@ -242,3 +242,37 @@ def test_batch_match_and_cancellation(memory_db: DatabaseManager, tmp_path: Path
             target_databases=[db],
             cancel_event=cancel_event,
         )
+
+
+def test_match_single_candidate_skips_missing_database(memory_db: DatabaseManager, tmp_path: Path) -> None:
+    """Verify non-existent database file is skipped gracefully without raising LocalMatcherError."""
+    repo = CandidateRepository(memory_db)
+    audio_file = tmp_path / "track.mp3"
+    audio_file.write_bytes(b"AUDIO")
+    cand = repo.upsert_candidate(audio_file, "track.mp3", "track.mp3", 100)
+
+    missing_db = tmp_path / "non_existent.pklz"
+    valid_db = tmp_path / "valid.pklz"
+    valid_db.write_bytes(b"PKLZ")
+
+    service = LocalMatcherService(candidate_repo=repo)
+    checked_dbs = []
+
+    def on_checked(path: Path, matches: list) -> None:
+        checked_dbs.append(path)
+
+    with (
+        patch.object(service, "extract_hashes", return_value=np.array([[10, 20]])),
+        patch.object(service, "match_hashes_against_database", return_value=[]),
+    ):
+        result = service.match_single_candidate(
+            candidate=cand,
+            target_databases=[missing_db, valid_db],
+            on_database_checked=on_checked,
+        )
+
+        assert result.candidate_id == cand.id
+        assert result.databases_searched == 1  # Only valid_db was searched
+        assert len(checked_dbs) == 2  # Both callbacks fired
+        assert checked_dbs[0] == missing_db
+        assert checked_dbs[1] == valid_db

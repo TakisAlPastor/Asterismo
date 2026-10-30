@@ -194,6 +194,10 @@ class ScannerView(QWidget):
         self._btn_deselect_all_dbs.clicked.connect(self._deselect_all_databases)
         db_actions_layout.addWidget(self._btn_deselect_all_dbs)
 
+        self._btn_refresh_dbs = QPushButton("Refresh", right_widget)
+        self._btn_refresh_dbs.clicked.connect(self.reload_databases)
+        db_actions_layout.addWidget(self._btn_refresh_dbs)
+
         right_layout.addLayout(db_actions_layout)
 
         self._db_tree = QTreeWidget(right_widget)
@@ -296,16 +300,29 @@ class ScannerView(QWidget):
             groups.setdefault(entry.prefix_label, []).append(entry)
 
         for prefix, entries in sorted(groups.items()):
-            parent_item = QTreeWidgetItem([prefix, f"{sum(e.track_count for e in entries):,} tracks"])
+            valid_tracks = sum(e.track_count for e in entries if e.file_path.is_file())
+            parent_item = QTreeWidgetItem([prefix, f"{valid_tracks:,} tracks"])
             parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
             parent_item.setCheckState(0, Qt.CheckState.Checked)
 
+            has_valid_child = False
             for e in entries:
-                child = QTreeWidgetItem([e.file_name, f"{e.track_count:,}"])
+                file_exists = e.file_path.is_file()
+                display_name = e.file_name if file_exists else f"[Missing] {e.file_name}"
+                child = QTreeWidgetItem([display_name, f"{e.track_count:,}"])
                 child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                child.setCheckState(0, Qt.CheckState.Checked)
+                if file_exists:
+                    child.setCheckState(0, Qt.CheckState.Checked)
+                    has_valid_child = True
+                else:
+                    child.setCheckState(0, Qt.CheckState.Unchecked)
+                    child.setForeground(0, Qt.GlobalColor.red)
+                    child.setToolTip(0, f"File missing from disk: {e.file_path}")
                 child.setData(0, Qt.ItemDataRole.UserRole, str(e.file_path))
                 parent_item.addChild(child)
+
+            if not has_valid_child:
+                parent_item.setCheckState(0, Qt.CheckState.Unchecked)
 
             self._db_tree.addTopLevelItem(parent_item)
 

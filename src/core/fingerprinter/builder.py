@@ -5,7 +5,9 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -505,69 +507,82 @@ class FingerprintBuilderService:
         if not batches:
             return []
 
-        effective_work_dir = work_dir or output_dir / ".work"
+        is_managed_temp = work_dir is None
+        if work_dir is not None:
+            effective_work_dir = work_dir
+        else:
+            effective_work_dir = (
+                Path(tempfile.gettempdir())
+                / "asterismo"
+                / "work"
+                / f"batch_{os.getpid()}_{int(time.monotonic() * 1000)}"
+            )
         effective_work_dir.mkdir(parents=True, exist_ok=True)
 
         results: list[FingerprintBatchResult] = []
         num_batches = len(batches)
 
-        for batch_idx, batch_tracks in enumerate(batches, start=1):
-            if cancel_event is not None and cancel_event.is_set():
-                raise FingerprintBuilderCancelledError(
-                    "Batch build process cancelled.")
+        try:
+            for batch_idx, batch_tracks in enumerate(batches, start=1):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise FingerprintBuilderCancelledError(
+                        "Batch build process cancelled.")
 
-            target_pklz = resolve_unique_pklz_path(
-                output_dir=output_dir,
-                prefix_label=archive_prefix,
-                batch_index=batch_idx,
-                overwrite=True,
-            )
-
-            # Determine intra-batch part parallelism
-            parts = 1
-            if len(batch_tracks) >= AUDFPRINT_MIN_FILES_FOR_MULTIPART and worker_count > 1:
-                parts = max(1, min(worker_count, len(
-                    batch_tracks) // AUDFPRINT_MIN_FILES_PER_PART))
-
-            t0 = time.monotonic()
-            in_memory_ht = None
-            if parts > 1:
-                final_path, unreadable = self.build_batch_subprocess(
-                    audio_files=batch_tracks,
-                    output_pklz=target_pklz,
-                    work_dir=effective_work_dir,
-                    parts=parts,
-                    density=density,
-                    cancel_event=cancel_event,
-                    progress_callback=progress_callback,
-                )
-            else:
-                final_path, unreadable, in_memory_ht = self.build_batch_inprocess(
-                    audio_files=batch_tracks,
-                    output_pklz=target_pklz,
-                    density=density,
-                    cancel_event=cancel_event,
-                    progress_callback=progress_callback,
-                )
-            elapsed = time.monotonic() - t0
-
-            if in_memory_ht is not None:
-                stats = self.inspect_hashtable(
-                    in_memory_ht, final_path, compute_sha256=True)
-            else:
-                stats = self.inspect_pklz(final_path, compute_sha256=True)
-            catalog_entry = self.register_in_catalog(
-                stats, prefix_label=archive_prefix, batch_index=batch_idx)
-
-            results.append(
-                FingerprintBatchResult(
+                target_pklz = resolve_unique_pklz_path(
+                    output_dir=output_dir,
+                    prefix_label=archive_prefix,
                     batch_index=batch_idx,
-                    pklz_path=final_path,
-                    stats=stats,
-                    catalog_entry=catalog_entry,
-                    unreadable_files=tuple(unreadable),
-                    elapsed_seconds=elapsed,
+                    overwrite=True,
                 )
-            )
 
-        return results
+                # Determine intra-batch part parallelism
+                parts = 1
+                if len(batch_tracks) >= AUDFPRINT_MIN_FILES_FOR_MULTIPART and worker_count > 1:
+                    parts = max(1, min(worker_count, len(
+                        batch_tracks) // AUDFPRINT_MIN_FILES_PER_PART))
+
+                t0 = time.monotonic()
+                in_memory_ht = None
+                if parts > 1:
+                    final_path, unreadable = self.build_batch_subprocess(
+                        audio_files=batch_tracks,
+                        output_pklz=target_pklz,
+                        work_dir=effective_work_dir,
+                        parts=parts,
+                        density=density,
+                        cancel_event=cancel_event,
+                        progress_callback=progress_callback,
+                    )
+                else:
+                    final_path, unreadable, in_memory_ht = self.build_batch_inprocess(
+                        audio_files=batch_tracks,
+                        output_pklz=target_pklz,
+                        density=density,
+                        cancel_event=cancel_event,
+                        progress_callback=progress_callback,
+                    )
+                elapsed = time.monotonic() - t0
+
+                if in_memory_ht is not None:
+                    stats = self.inspect_hashtable(
+                        in_memory_ht, final_path, compute_sha256=True)
+                else:
+                    stats = self.inspect_pklz(final_path, compute_sha256=True)
+                catalog_entry = self.register_in_catalog(
+                    stats, prefix_label=archive_prefix, batch_index=batch_idx)
+
+                results.append(
+                    FingerprintBatchResult(
+                        batch_index=batch_idx,
+                        pklz_path=final_path,
+                        stats=stats,
+                        catalog_entry=catalog_entry,
+                        unreadable_files=tuple(unreadable),
+                        elapsed_seconds=elapsed,
+                    )
+                )
+
+            return results
+        finally:
+            if is_managed_temp and effective_work_dir.exists():
+                shutil.rmtree(effective_work_dir, ignore_errors=True)

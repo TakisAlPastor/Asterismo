@@ -183,11 +183,19 @@ class LocalMatcherService:
             if cancel_event is not None and cancel_event.is_set():
                 raise LocalMatcherCancelledError("Scan cancelled by user.")
 
+            resolved_db = db_path.resolve()
+            if not resolved_db.is_file():
+                logger.warning(
+                    "Target database file not found, skipping: %s", resolved_db)
+                if on_database_checked is not None:
+                    on_database_checked(db_path, [])
+                continue
+
             dbs_searched += 1
             try:
                 db_matches = self.match_hashes_against_database(
                     query_hashes=query_hashes,
-                    database_path=db_path,
+                    database_path=resolved_db,
                     candidate_id=candidate.id,
                     min_aligned_hashes=opts.min_aligned_hashes,
                 )

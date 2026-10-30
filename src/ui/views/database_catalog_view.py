@@ -54,6 +54,7 @@ def _format_size(bytes_val: int) -> str:
 class DatabaseCatalogView(QWidget):
     """View managing .pklz archive discovery, integrity auditing, and track introspection (US-3.1)."""
 
+    catalog_updated = Signal()
     log_requested = Signal(str)
 
     def __init__(
@@ -230,6 +231,11 @@ class DatabaseCatalogView(QWidget):
         self._reconcile_btn.clicked.connect(self.start_reconciliation)
         top_row.addWidget(self._reconcile_btn)
 
+        self._clean_missing_btn = QPushButton(
+            "Clean Missing", controls_frame)
+        self._clean_missing_btn.clicked.connect(self.clean_missing_entries)
+        top_row.addWidget(self._clean_missing_btn)
+
         layout.addLayout(top_row)
 
         # Bottom row: Search filter & status
@@ -283,9 +289,12 @@ class DatabaseCatalogView(QWidget):
             if query and query not in entry.file_name.lower() and query not in entry.prefix_label.lower():
                 continue
 
+            file_exists = entry.file_path.is_file()
+            display_name = entry.file_name if file_exists else f"[Missing] {entry.file_name}"
+
             item = QTreeWidgetItem(
                 [
-                    entry.file_name,
+                    display_name,
                     entry.prefix_label,
                     f"{entry.track_count:,}",
                     f"{entry.total_hashes:,}",
@@ -294,6 +303,10 @@ class DatabaseCatalogView(QWidget):
                         entry.sha256_hash) > 16 else entry.sha256_hash,
                 ]
             )
+            if not file_exists:
+                item.setForeground(0, Qt.GlobalColor.red)
+                item.setToolTip(
+                    0, f"File not found on disk: {entry.file_path}")
             item.setData(0, Qt.ItemDataRole.UserRole, str(entry.file_path))
             self._tree_widget.addTopLevelItem(item)
 
@@ -317,6 +330,12 @@ class DatabaseCatalogView(QWidget):
         file_path = Path(raw_path)
         self._details_title.setText(file_path.name)
         self._details_path_label.setText(str(file_path))
+
+        if not file_path.is_file():
+            self._tracks_count_label.setText(
+                "Error: Database file not found on disk.")
+            self._tracks_list.clear()
+            return
 
         try:
             track_names = self._service.get_database_track_names(file_path)
@@ -354,6 +373,7 @@ class DatabaseCatalogView(QWidget):
             return
 
         self._reconcile_btn.setEnabled(False)
+        self._clean_missing_btn.setEnabled(False)
         self._browse_btn.setEnabled(False)
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
@@ -403,6 +423,21 @@ class DatabaseCatalogView(QWidget):
         self._status_label.setText(msg)
         self.log_requested.emit(f"[OK] {msg}")
         self.refresh_catalog()
+        self.catalog_updated.emit()
+
+    @Slot()
+    def clean_missing_entries(self) -> None:
+        """Purge all catalog entries whose files no longer exist on disk."""
+        pruned = self._service.prune_nonexistent(global_prune=True)
+        msg = f"Cleaned {pruned} missing database record(s)."
+        self._status_label.setText(msg)
+        self.log_requested.emit(f"[OK] {msg}")
+        self.refresh_catalog()
+        self.catalog_updated.emit()
+
+    def set_archive_dir(self, dir_path: Path) -> None:
+        """Update active archive directory path input."""
+        self._dir_input.setText(str(dir_path))
 
     @Slot()
     def _on_worker_teardown(self) -> None:
@@ -410,5 +445,6 @@ class DatabaseCatalogView(QWidget):
         self._worker = None
         self._worker_thread = None
         self._reconcile_btn.setEnabled(True)
+        self._clean_missing_btn.setEnabled(True)
         self._browse_btn.setEnabled(True)
         self._progress_bar.setVisible(False)

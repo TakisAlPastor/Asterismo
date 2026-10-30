@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sqlite3
+from typing import Sequence
 
 from src.core.config.models import PklzCatalogEntry
 from src.core.database.connection import DatabaseError, DatabaseManager
@@ -97,6 +98,16 @@ class CatalogRepository:
         sql = "DELETE FROM pklz_catalog WHERE file_path = ?;"
         cursor = self._db.execute(sql, (resolved_path,))
         return cursor.rowcount > 0
+
+    def delete_by_paths(self, file_paths: Sequence[Path]) -> int:
+        """Delete multiple entries by their file paths. Returns count of deleted entries."""
+        if not file_paths:
+            return 0
+        resolved_paths = [str(p.resolve()) for p in file_paths]
+        placeholders = ",".join("?" for _ in resolved_paths)
+        sql = f"DELETE FROM pklz_catalog WHERE file_path IN ({placeholders});"
+        cursor = self._db.execute(sql, tuple(resolved_paths))
+        return cursor.rowcount
 
     # ------------------- Private Row Mapping Helpers -------------------
 

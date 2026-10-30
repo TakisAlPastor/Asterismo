@@ -23,7 +23,10 @@ from src.core.process.runner import SilentProcessRunner
 
 logger = logging.getLogger(__name__)
 
-_BATCH_INDEX_REGEX = re.compile(r"\.part(\d+)\.pklz$", re.IGNORECASE)
+# Matches <prefix>-<batch>.pklz, <prefix>_<batch>.pklz, <prefix>.part<batch>.pklz, and collision duplicates (<prefix>-1_2.pklz)
+_BATCH_INDEX_REGEX = re.compile(
+    r"(?:[-_.]part[-_.]?|[-_])(\d+)(?:_\d+)?\.pklz$", re.IGNORECASE
+)
 
 
 class CatalogServiceError(Exception):
@@ -152,17 +155,10 @@ class CatalogService:
 
         pruned_count = 0
         if prune_missing:
-            # Prune records residing inside root_dir whose files no longer exist on disk
-            all_entries = self._repo.list_entries()
-            for entry in all_entries:
-                try:
-                    entry.file_path.relative_to(resolved_root)
-                    if not entry.file_path.is_file():
-                        self._repo.delete_by_path(entry.file_path)
-                        pruned_count += 1
-                except ValueError:
-                    # Entry is not under resolved_root, leave intact
-                    continue
+            pruned_count = self.prune_nonexistent(
+                root_dir=resolved_root,
+                global_prune=True,
+            )
 
         summary = self.get_catalog_summary()
         return ReconciliationResult(
@@ -213,3 +209,31 @@ class CatalogService:
             "total_hashes": sum(e.total_hashes for e in entries),
             "total_size_bytes": sum(e.file_size_bytes for e in entries),
         }
+
+    def prune_nonexistent(
+        self,
+        root_dir: Path | None = None,
+        global_prune: bool = True,
+    ) -> int:
+        """Prune database entries whose physical files no longer exist on disk."""
+        all_entries = self._repo.list_entries()
+        resolved_root = root_dir.resolve() if root_dir is not None else None
+        to_prune: list[Path] = []
+
+        for entry in all_entries:
+            if not global_prune and resolved_root is not None:
+                try:
+                    entry.file_path.relative_to(resolved_root)
+                except ValueError:
+                    continue
+
+            if not entry.file_path.is_file():
+                to_prune.append(entry.file_path)
+
+        if to_prune:
+            return self._repo.delete_by_paths(to_prune)
+        return 0
+
+    def delete_entry_by_path(self, file_path: Path) -> bool:
+        """Delete a single catalog record by its file path."""
+        return self._repo.delete_by_path(file_path)

@@ -227,14 +227,16 @@ class MainWindow(QMainWindow):
         return widget
 
     def _init_signals(self) -> None:
-        self._sidebar.currentRowChanged.connect(
-            self._view_stack.setCurrentIndex)
+        self._sidebar.currentRowChanged.connect(self._on_navigation_changed)
         self._settings_view.settings_saved.connect(self.on_settings_saved)
         self._settings_view.log_requested.connect(self._log_console.append_log)
 
         if self._catalog_view is not None:
             self._catalog_view.log_requested.connect(
                 self._log_console.append_log)
+            if self._scanner_view is not None:
+                self._catalog_view.catalog_updated.connect(
+                    self._scanner_view.reload_databases)
             if self._harvester_view is not None:
                 self._harvester_view.catalog_updated.connect(
                     self._catalog_view.refresh_catalog)
@@ -260,6 +262,15 @@ class MainWindow(QMainWindow):
         # Log initial startup
         self._log_console.append_log(f"{APP_NAME} desktop shell initialized.")
 
+    @Slot(int)
+    def _on_navigation_changed(self, index: int) -> None:
+        """Handle view stack tab switching and refresh active views if needed."""
+        self._view_stack.setCurrentIndex(index)
+        if index == 1 and self._catalog_view is not None:
+            self._catalog_view.refresh_catalog()
+        elif index == 2 and self._scanner_view is not None:
+            self._scanner_view.reload_databases()
+
     @Slot(AppSettings)
     def on_settings_saved(self, settings: AppSettings) -> None:
         """Apply theme updates and runtime settings dynamically when settings are saved."""
@@ -268,6 +279,11 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(build_stylesheet(settings.theme))
         if self._doctor_service and self._doctor_service.binary_locator:
             self._doctor_service.binary_locator.bin_dir = settings.paths.bin_dir
+        if self._catalog_view is not None:
+            self._catalog_view.set_archive_dir(settings.paths.db_dir)
+            self._catalog_view.refresh_catalog()
+        if self._scanner_view is not None:
+            self._scanner_view.reload_databases()
         self._status_bar.showMessage("Settings saved successfully.", 3000)
 
     def closeEvent(self, event: QCloseEvent) -> None:
