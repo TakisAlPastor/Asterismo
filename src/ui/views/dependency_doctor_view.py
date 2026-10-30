@@ -193,10 +193,21 @@ class DependencyDoctorView(QWidget):
         scroll_area.setWidget(container)
         main_layout.addWidget(scroll_area)
 
+    def _is_worker_running(self) -> bool:
+        """Check if a background worker thread is currently active."""
+        return self._worker_thread is not None and self._worker_thread.isRunning()
+
+    @Slot()
+    def _on_worker_teardown(self) -> None:
+        """Reset worker and thread references once execution terminates."""
+        self._worker = None
+        self._worker_thread = None
+        self._set_actions_enabled(True)
+
     @Slot()
     def start_diagnostics(self) -> None:
         """Spawn DoctorWorker in background QThread to run binary diagnostic check."""
-        if self._worker_thread and self._worker_thread.isRunning():
+        if self._is_worker_running():
             return
 
         self._set_actions_enabled(False)
@@ -213,15 +224,14 @@ class DependencyDoctorView(QWidget):
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker._doctor_worker_cleanup if hasattr(self._worker, "_doctor_worker_cleanup") else self._worker.deleteLater)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            lambda: self._set_actions_enabled(True))
+        self._worker_thread.finished.connect(self._on_worker_teardown)
 
         self._worker_thread.start()
 
     @Slot(str)
     def start_winget_provision(self, package_id: str) -> None:
         """Spawn background worker to provision an approved package via winget."""
-        if self._worker_thread and self._worker_thread.isRunning():
+        if self._is_worker_running():
             return
 
         self._set_actions_enabled(False)
@@ -239,8 +249,7 @@ class DependencyDoctorView(QWidget):
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            lambda: self._set_actions_enabled(True))
+        self._worker_thread.finished.connect(self._on_worker_teardown)
 
         self._worker_thread.start()
 

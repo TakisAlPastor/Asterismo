@@ -439,10 +439,21 @@ class HarvesterView(QWidget):
     # Pipeline Execution Triggers & Worker Thread Management
     # --------------------------------------------------------------------------
 
+    def _is_worker_running(self) -> bool:
+        """Check if a background worker thread is currently active."""
+        return self._worker_thread is not None and self._worker_thread.isRunning()
+
+    @Slot()
+    def _on_worker_teardown(self) -> None:
+        """Reset worker and thread references once execution terminates."""
+        self._worker = None
+        self._worker_thread = None
+        self._set_controls_running(False)
+
     @Slot()
     def start_queue_harvest(self) -> None:
         """Launch the background HarvesterWorker to process the URL queue."""
-        if self._worker_thread and self._worker_thread.isRunning():
+        if self._is_worker_running():
             return
 
         self._set_controls_running(True)
@@ -465,15 +476,14 @@ class HarvesterView(QWidget):
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            lambda: self._set_controls_running(False))
+        self._worker_thread.finished.connect(self._on_worker_teardown)
 
         self._worker_thread.start()
 
     @Slot()
     def start_disk_build(self) -> None:
         """Launch background HarvesterWorker to process local disk folder into .pklz."""
-        if self._worker_thread and self._worker_thread.isRunning():
+        if self._is_worker_running():
             return
 
         folder_str = self._disk_folder_edit.text().strip()
@@ -508,8 +518,7 @@ class HarvesterView(QWidget):
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
-        self._worker_thread.finished.connect(
-            lambda: self._set_controls_running(False))
+        self._worker_thread.finished.connect(self._on_worker_teardown)
 
         self._worker_thread.start()
 
