@@ -7,6 +7,7 @@ from src.ui.views.dependency_doctor_view import (
     DependencyDoctorView,
 )
 from src.ui.views.harvester_view import HarvesterView
+from src.ui.views.scanner_view import ScannerView
 from src.ui.views.settings_view import SettingsView
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "DependencyDoctorDialog",
     "DependencyDoctorView",
     "HarvesterView",
+    "ScannerView",
     "SettingsView",
 ]

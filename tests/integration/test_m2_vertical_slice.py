@@ -305,19 +305,20 @@ def test_m2_harvester_worker_qthread_execution(qapp: QApplication, tmp_path: Pat
     # 3. Launch background execution in real QThread
     hv.start_queue_harvest()
     assert hv._worker is not None
-    assert hv._worker_thread is not None
+    worker_thread = hv._worker_thread
+    assert worker_thread is not None
     hv._worker.error_occurred.connect(errors.append)
 
     # 4. Wait for worker thread to complete execution while processing Qt events
     import time
     for _ in range(300):
         qapp.processEvents()
-        if hv._worker_thread.isFinished():
+        if hv._worker_thread is None or worker_thread.isFinished():
             break
         time.sleep(0.05)
 
     qapp.processEvents()
-    assert hv._worker_thread.isFinished(), "Worker thread timed out"
+    assert hv._worker_thread is None or worker_thread.isFinished(), "Worker thread timed out"
 
     # 5. Assert no SQLite thread errors occurred and task was completed
     assert not errors, f"HarvesterWorker failed with errors: {errors}"

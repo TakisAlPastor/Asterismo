@@ -20,6 +20,9 @@ from src.core.database.harvest_repository import HarvestRepository
 from src.core.database.catalog_repository import CatalogRepository
 from src.core.database.migrations import MigrationManager
 from src.core.database.settings_repository import SettingsRepository
+from src.core.database.candidate_repository import CandidateRepository
+from src.core.matcher.candidate_reconciler import CandidateReconciler
+from src.core.matcher.local_matcher import LocalMatcherService
 from src.core.fingerprinter.builder import FingerprintBuilderService
 from src.core.fingerprinter.catalog_service import CatalogService
 from src.core.harvester.audio_splitter import AudioSplitterService
@@ -85,7 +88,16 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         catalog_repo=catalog_repo,
         builder=builder_service,
     )
-
+    candidate_repo = CandidateRepository(db=db_manager)
+    candidate_reconciler = CandidateReconciler(
+        candidate_repo=candidate_repo,
+        splitter=audio_splitter,
+    )
+    matcher_service = LocalMatcherService(
+        candidate_repo=candidate_repo,
+        locator=binary_locator,
+        runner=process_runner,
+    )
     # 4. Initialize Qt Application
     app = QApplication.instance()
     if app is None:
@@ -102,6 +114,10 @@ def bootstrap_application(base_dir: Path | None = None) -> tuple[QApplication, M
         process_runner=process_runner,
         harvester_service=harvester_service,
         catalog_service=catalog_service,
+        candidate_repo=candidate_repo,
+        catalog_repo=catalog_repo,
+        matcher_service=matcher_service,
+        candidate_reconciler=candidate_reconciler,
     )
 
     return app, window

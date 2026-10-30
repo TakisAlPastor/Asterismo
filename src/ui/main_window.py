@@ -36,9 +36,14 @@ from src.ui.theme import (
 )
 from src.ui.views.database_catalog_view import DatabaseCatalogView
 from src.ui.views.harvester_view import HarvesterView
+from src.ui.views.scanner_view import ScannerView
 from src.ui.views.settings_view import SettingsView
 from src.core.fingerprinter.catalog_service import CatalogService
 from src.core.harvester.service import HarvesterService
+from src.core.database.candidate_repository import CandidateRepository
+from src.core.database.catalog_repository import CatalogRepository
+from src.core.matcher.candidate_reconciler import CandidateReconciler
+from src.core.matcher.local_matcher import LocalMatcherService
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +58,11 @@ class MainWindow(QMainWindow):
         process_runner: SilentProcessRunner,
         harvester_service: HarvesterService | None = None,
         catalog_service: CatalogService | None = None,
+        scanner_view: ScannerView | None = None,
+        candidate_repo: CandidateRepository | None = None,
+        catalog_repo: CatalogRepository | None = None,
+        matcher_service: LocalMatcherService | None = None,
+        candidate_reconciler: CandidateReconciler | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -63,6 +73,11 @@ class MainWindow(QMainWindow):
         self._process_runner = process_runner
         self._harvester_service = harvester_service
         self._catalog_service = catalog_service
+        self._scanner_view = scanner_view
+        self._candidate_repo = candidate_repo
+        self._catalog_repo = catalog_repo
+        self._matcher_service = matcher_service
+        self._candidate_reconciler = candidate_reconciler
 
         self._init_window()
         self._init_layout()
@@ -133,10 +148,32 @@ class MainWindow(QMainWindow):
             )
             self._view_stack.addWidget(self._catalog_placeholder)
 
-        self._scanner_placeholder = self._create_placeholder(
-            "Multi-Engine Scanner (Milestone 3/4)",
-            "Local audfprint matching + Cloud Shazam/AcoustID/AudioTag recognition.",
-        )
+        if self._scanner_view is not None:
+            self._scanner_placeholder = None
+            self._view_stack.addWidget(self._scanner_view)
+        elif (
+            self._candidate_repo is not None
+            and self._catalog_repo is not None
+            and self._matcher_service is not None
+            and self._candidate_reconciler is not None
+        ):
+            self._scanner_view = ScannerView(
+                candidate_repo=self._candidate_repo,
+                catalog_repo=self._catalog_repo,
+                matcher_service=self._matcher_service,
+                reconciler=self._candidate_reconciler,
+                settings_repo=self._settings_repo,
+                parent=self._view_stack,
+            )
+            self._scanner_placeholder = None
+            self._view_stack.addWidget(self._scanner_view)
+        else:
+            self._scanner_view = None
+            self._scanner_placeholder = self._create_placeholder(
+                "Multi-Engine Scanner (Milestone 3/4)",
+                "Local audfprint matching + Cloud Shazam/AcoustID/AudioTag recognition.",
+            )
+            self._view_stack.addWidget(self._scanner_placeholder)
 
         # Active Milestone 1 View: SettingsView (with integrated DependencyDoctor access)
         self._settings_view = SettingsView(
@@ -147,7 +184,6 @@ class MainWindow(QMainWindow):
             parent=self._view_stack,
         )
 
-        self._view_stack.addWidget(self._scanner_placeholder)
         self._view_stack.addWidget(self._settings_view)
 
         content_splitter.addWidget(self._view_stack)
@@ -202,6 +238,13 @@ class MainWindow(QMainWindow):
             if self._harvester_view is not None:
                 self._harvester_view.catalog_updated.connect(
                     self._catalog_view.refresh_catalog)
+                if self._scanner_view is not None:
+                    self._harvester_view.catalog_updated.connect(
+                        self._scanner_view.reload_databases)
+
+        if self._scanner_view is not None:
+            self._scanner_view.log_requested.connect(
+                self._log_console.append_log)
 
         if self._harvester_view is not None:
             self._harvester_view.log_requested.connect(
@@ -237,6 +280,10 @@ class MainWindow(QMainWindow):
     @property
     def log_console(self) -> LogConsole:
         return self._log_console
+
+    @property
+    def scanner_view(self) -> ScannerView | None:
+        return self._scanner_view
 
     @property
     def catalog_view(self) -> DatabaseCatalogView | None:
