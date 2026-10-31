@@ -164,6 +164,21 @@ class CandidateRepository:
         cursor = self._db.execute(sql, (candidate_id,))
         return cursor.rowcount > 0
 
+    def delete_candidates(self, ids: Sequence[int]) -> int:
+        """Delete multiple candidate records by ID (cascades to scan_matches)."""
+        if not ids:
+            return 0
+        placeholders = ", ".join("?" for _ in ids)
+        sql = f"DELETE FROM scan_candidates WHERE id IN ({placeholders});"
+        cursor = self._db.execute(sql, tuple(ids))
+        return cursor.rowcount
+
+    def delete_missing_candidates(self) -> int:
+        """Delete all candidate records currently marked as missing (cascades to scan_matches)."""
+        sql = "DELETE FROM scan_candidates WHERE status = 'missing';"
+        cursor = self._db.execute(sql)
+        return cursor.rowcount
+
     # ------------------- Scan Match CRUD -------------------
 
     def add_match(
@@ -227,6 +242,10 @@ class CandidateRepository:
         sql = "DELETE FROM scan_matches WHERE candidate_id = ?;"
         cursor = self._db.execute(sql, (candidate_id,))
         return cursor.rowcount
+
+    def clear_matches_for_candidate(self, candidate_id: int) -> int:
+        """Clear all match records for a specific candidate (alias for delete_matches_for_candidate)."""
+        return self.delete_matches_for_candidate(candidate_id)
 
     # ------------------- Private Row Mappers -------------------
 

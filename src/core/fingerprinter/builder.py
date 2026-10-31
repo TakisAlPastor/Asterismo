@@ -156,6 +156,29 @@ class FingerprintBuilderService:
         self._catalog_repo = catalog_repo
         ensure_audfprint_importable()
 
+    @staticmethod
+    def _sanitize_hashtable_names(pklz_path: Path) -> None:
+        """Ensure all track names stored in the .pklz HashTable are clean filenames without directories."""
+        ensure_audfprint_importable()
+        import hash_table  # type: ignore[import-not-found]
+
+        if not pklz_path.is_file():
+            return
+        try:
+            ht = hash_table.HashTable(str(pklz_path))
+            changed = False
+            for i in range(len(ht.names)):
+                if ht.names[i] is not None:
+                    clean = Path(str(ht.names[i])).name
+                    if clean != ht.names[i]:
+                        ht.names[i] = clean
+                        changed = True
+            if changed:
+                ht.save(str(pklz_path))
+        except Exception as exc:
+            logger.warning(
+                "Failed sanitizing hashtable track names in %s: %s", pklz_path.name, exc)
+
     def inspect_hashtable(
         self,
         ht: Any,
@@ -293,6 +316,10 @@ class FingerprintBuilderService:
                     dur, num_hashes = analyzer.ingest(ht, file_str)
                     if dur <= 0.0 or num_hashes == 0:
                         unreadable.append(file_path)
+                    else:
+                        # Ensure track name in hash table is clean canonical filename, not staging directory
+                        if len(ht.names) > 0 and ht.names[-1] is not None:
+                            ht.names[-1] = file_path.name
                 except Exception as exc:
                     logger.warning("Failed ingesting %s: %s",
                                    file_path.name, exc)
@@ -363,7 +390,7 @@ class FingerprintBuilderService:
 
             def _handle_line(line: str) -> None:
                 if line.startswith(_UNREADABLE_MARKER):
-                    raw_path = line[len(_UNREADABLE_MARKER)                                    :].rstrip(" skipping")
+                    raw_path = line[len(_UNREADABLE_MARKER):].rstrip(" skipping")
                     unreadable.append(Path(raw_path))
                 m = _INGESTING_REGEX.search(line)
                 if m and progress_callback is not None:
@@ -388,6 +415,7 @@ class FingerprintBuilderService:
                         f"audfprint failed with code {res.returncode}: {res.stderr or res.stdout}"
                     )
 
+                self._sanitize_hashtable_names(tmp_pklz)
                 os.replace(tmp_pklz, output_pklz)
                 return output_pklz, unreadable
             finally:
@@ -431,7 +459,7 @@ class FingerprintBuilderService:
 
                 def _part_line(line: str) -> None:
                     if line.startswith(_UNREADABLE_MARKER):
-                        raw_p = line[len(_UNREADABLE_MARKER)                                     :].rstrip(" skipping")
+                        raw_p = line[len(_UNREADABLE_MARKER):].rstrip(" skipping")
                         with lock:
                             unreadable.append(Path(raw_p))
                     m = _INGESTING_REGEX.search(line)
@@ -482,6 +510,7 @@ class FingerprintBuilderService:
                         f"audfprint newmerge failed with code {merge_res.returncode}: {merge_res.stderr}"
                     )
 
+                self._sanitize_hashtable_names(tmp_pklz)
                 os.replace(tmp_pklz, output_pklz)
                 return output_pklz, unreadable
             finally:

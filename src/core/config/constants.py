@@ -51,6 +51,8 @@ MIGRATION_V3_NAME: str = "003_scan_candidates_and_matches"
 # Local Matcher & Candidate Scanning Constants
 LOCAL_MATCH_MIN_HASH_THRESHOLD: int = 5
 LOCAL_MATCH_EARLY_STOP_THRESHOLD: int = 15
+LOCAL_MATCH_MAX_ALIGNMENTS_PER_ID: int = 1
+LOCAL_MATCH_DOMINANCE_RATIO: float = 0.10
 AUDIO_EXTENSIONS_SUPPORTED: tuple[str, ...] = (
     ".mp3",
     ".wav",

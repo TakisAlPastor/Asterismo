@@ -159,3 +159,31 @@ def test_reconcile_invalid_dir(memory_db: DatabaseManager, tmp_path: Path) -> No
 
     with pytest.raises(CandidateReconcilerError, match="not found"):
         reconciler.reconcile_directory(tmp_path / "does_not_exist")
+
+
+def test_reconcile_with_prune_missing(memory_db: DatabaseManager, tmp_path: Path) -> None:
+    """Verify prune_missing=True physically deletes missing candidates from storage."""
+    repo = CandidateRepository(memory_db)
+    reconciler = CandidateReconciler(candidate_repo=repo)
+
+    input_dir = tmp_path / "audio"
+    input_dir.mkdir()
+    f1 = input_dir / "stay.mp3"
+    f2 = input_dir / "delete_me.mp3"
+    f1.write_bytes(b"STAY")
+    f2.write_bytes(b"REMOVE")
+
+    # Initial discovery
+    res1 = reconciler.reconcile_directory(input_dir, prune_missing=False)
+    assert res1.discovered_files == 2
+    assert res1.new_candidates == 2
+
+    # Remove f2 from disk
+    f2.unlink()
+
+    # Reconcile with prune_missing=True
+    res2 = reconciler.reconcile_directory(input_dir, prune_missing=True)
+    assert res2.discovered_files == 1
+    assert res2.pruned_candidates == 1
+    assert repo.get_candidate_by_path(f2) is None
+    assert repo.get_candidate_by_path(f1) is not None

@@ -411,3 +411,36 @@ def test_builder_uses_tempfile_work_dir_and_cleans_up(tmp_path: Path) -> None:
     assert len(results) == 1
     # Verify .work was NOT created in output_dir
     assert not (output_dir / ".work").exists()
+
+
+def test_builder_track_name_sanitization_inprocess(tmp_path: Path) -> None:
+    """Verify build_batch_inprocess stores clean filenames instead of staging paths."""
+    mock_runner = MagicMock(spec=SilentProcessRunner)
+    mock_locator = MagicMock(spec=BinaryLocator)
+    mock_locator.locate.return_value = None
+    service = FingerprintBuilderService(runner=mock_runner, locator=mock_locator)
+
+    staging_dir = tmp_path / "Input" / ".staging_task_9_youtubecom_watch"
+    staging_dir.mkdir(parents=True)
+    staging_file = staging_dir / "Wonderless.m4a"
+    staging_file.write_bytes(b"AUDIO_DATA")
+    output_pklz = tmp_path / "db.pklz"
+
+    with (
+        patch("audfprint_analyze.Analyzer") as mock_analyzer_cls,
+        patch("hash_table.HashTable") as mock_ht_cls,
+    ):
+        mock_analyzer = MagicMock()
+        mock_analyzer.ingest.return_value = (180.0, 500)
+        mock_analyzer_cls.return_value = mock_analyzer
+
+        mock_ht = MagicMock()
+        # analyzer.ingest appends full resolved path originally
+        mock_ht.names = [str(staging_file.resolve())]
+        mock_ht.save.side_effect = lambda p: Path(p).write_bytes(b"PKLZ")
+        mock_ht_cls.return_value = mock_ht
+
+        service.build_batch_inprocess([staging_file], output_pklz)
+
+        # In-process build must sanitize ht.names[-1] to just the file name
+        assert mock_ht.names[-1] == "Wonderless.m4a"

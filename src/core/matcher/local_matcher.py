@@ -14,7 +14,9 @@ import numpy as np
 from src.core.config.constants import (
     AUDFPRINT_DEFAULT_DENSITY,
     DEP_KEY_FFMPEG,
+    LOCAL_MATCH_DOMINANCE_RATIO,
     LOCAL_MATCH_EARLY_STOP_THRESHOLD,
+    LOCAL_MATCH_MAX_ALIGNMENTS_PER_ID,
     LOCAL_MATCH_MIN_HASH_THRESHOLD,
 )
 from src.core.config.models import (
@@ -111,14 +113,14 @@ class LocalMatcherService:
             analyzer = audfprint_analyze.Analyzer(density=density)
             matcher = audfprint_match.Matcher()
             matcher.threshcount = min_aligned_hashes
+            matcher.max_alignments_per_id = LOCAL_MATCH_MAX_ALIGNMENTS_PER_ID
 
             results = matcher.match_hashes(ht, query_hashes)
             if results is None or len(results) == 0:
                 return []
 
-            hop_time = analyzer.n_hop / float(analyzer.target_sr)
-            matches: list[ScanMatchRecord] = []
-
+            # Deduplicate by track ID, preserving the single highest-scoring alignment
+            best_by_hit_id: dict[int, tuple[int, float, int]] = {}
             for row in results:
                 hit_id = int(row[0])
                 aligned_count = int(row[1])
@@ -126,6 +128,28 @@ class LocalMatcherService:
                 raw_count = int(row[3])
 
                 if aligned_count < min_aligned_hashes:
+                    continue
+
+                if hit_id not in best_by_hit_id or aligned_count > best_by_hit_id[hit_id][0]:
+                    best_by_hit_id[hit_id] = (
+                        aligned_count, time_skew, raw_count)
+
+            if not best_by_hit_id:
+                return []
+
+            # Relative dominance filtering against secondary hits when top hit is conclusive
+            max_aligned = max(v[0] for v in best_by_hit_id.values())
+            min_cutoff = (
+                max_aligned * LOCAL_MATCH_DOMINANCE_RATIO
+                if max_aligned >= LOCAL_MATCH_EARLY_STOP_THRESHOLD
+                else 0.0
+            )
+
+            hop_time = analyzer.n_hop / float(analyzer.target_sr)
+            matches: list[ScanMatchRecord] = []
+
+            for hit_id, (aligned_count, time_skew, raw_count) in best_by_hit_id.items():
+                if aligned_count < min_cutoff:
                     continue
 
                 track_title = (
@@ -149,6 +173,7 @@ class LocalMatcherService:
                 )
                 matches.append(match_rec)
 
+            matches.sort(key=lambda m: m.aligned_hashes, reverse=True)
             return matches
         except Exception as exc:
             raise LocalMatcherError(
@@ -178,6 +203,10 @@ class LocalMatcherService:
         all_matches: list[ScanMatchRecord] = []
         early_stopped = False
         dbs_searched = 0
+
+        # Purge stale match history on rescan to prevent duplicate accumulation
+        if candidate.id is not None:
+            self._repo.clear_matches_for_candidate(candidate.id)
 
         for db_path in target_databases:
             if cancel_event is not None and cancel_event.is_set():

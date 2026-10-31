@@ -32,6 +32,7 @@ class CandidateReconciliationResult:
     updated_candidates: int
     missing_candidates: int
     total_candidates: int
+    pruned_candidates: int = 0
 
 
 class CandidateReconciler:
@@ -51,10 +52,11 @@ class CandidateReconciler:
         self,
         input_dir: Path,
         probe_durations: bool = True,
+        prune_missing: bool = False,
         cancel_event: threading.Event | None = None,
         progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> CandidateReconciliationResult:
-        """Scan input_dir recursively, register candidates, and mark removed files as missing."""
+        """Scan input_dir recursively, register candidates, and mark or prune removed files."""
         if not input_dir.is_dir():
             raise CandidateReconcilerError(
                 f"Input audio directory not found: {input_dir}")
@@ -130,15 +132,28 @@ class CandidateReconciler:
         for cand in all_candidates:
             try:
                 cand.file_path.relative_to(resolved_root)
-                if not cand.file_path.is_file() and cand.status != ScanCandidateStatus.MISSING:
+                if not cand.file_path.is_file():
                     if cand.id is not None:
                         missing_ids.append(cand.id)
             except ValueError:
                 # Not under this input_dir, leave untouched
                 continue
 
-        missing_count = self._repo.mark_missing(
-            missing_ids) if missing_ids else 0
+        pruned_count = 0
+        missing_count = 0
+        if prune_missing and missing_ids:
+            pruned_count = self._repo.delete_candidates(missing_ids)
+        elif missing_ids:
+            unmarked_missing = [
+                cid
+                for cid in missing_ids
+                if any(c.id == cid and c.status != ScanCandidateStatus.MISSING for c in all_candidates)
+            ]
+            missing_count = (
+                self._repo.mark_missing(
+                    unmarked_missing) if unmarked_missing else 0
+            )
+
         total_in_db = len(self._repo.list_candidates())
 
         return CandidateReconciliationResult(
@@ -147,4 +162,5 @@ class CandidateReconciler:
             updated_candidates=updated_count,
             missing_candidates=missing_count,
             total_candidates=total_in_db,
+            pruned_candidates=pruned_count,
         )

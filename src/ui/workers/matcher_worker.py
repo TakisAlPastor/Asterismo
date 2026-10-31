@@ -86,8 +86,9 @@ class LocalMatcherWorker(QObject):
                 self.candidate_completed.emit(result)
                 for m in result.matches:
                     self.match_detected.emit(m)
+                    track_display = Path(m.matched_track).name or m.matched_track
                     self.log_emitted.emit(
-                        f"[MATCH] '{candidate.file_name}' -> '{m.matched_track}' "
+                        f"[MATCH] '{candidate.file_name}' -> '{track_display}' "
                         f"({m.aligned_hashes} hashes in {m.matched_database})"
                     )
 

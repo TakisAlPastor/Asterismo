@@ -440,3 +440,54 @@ def test_scanner_view_missing_databases_and_refresh_button(qapp: QApplication, t
     cat_repo.list_entries.reset_mock()
     view._btn_refresh_dbs.click()
     cat_repo.list_entries.assert_called_once()
+
+
+def test_scanner_view_purge_missing_and_delete_selected(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify purge_missing_candidates and _delete_selected_candidates call repo and reload table."""
+    cand_repo = MagicMock(spec=CandidateRepository)
+    cat_repo = MagicMock(spec=CatalogRepository)
+    matcher_service = MagicMock(spec=LocalMatcherService)
+    reconciler = MagicMock(spec=CandidateReconciler)
+    settings_repo = MagicMock(spec=SettingsRepository)
+
+    settings = MagicMock()
+    settings.paths.input_dir = tmp_path
+    settings_repo.load.return_value = settings
+
+    cand1 = ScanCandidateRecord(
+        id=10,
+        file_path=tmp_path / "song1.mp3",
+        file_name="song1.mp3",
+        relative_path="song1.mp3",
+        file_size_bytes=1000,
+        status=ScanCandidateStatus.MISSING,
+    )
+    cand2 = ScanCandidateRecord(
+        id=20,
+        file_path=tmp_path / "song2.mp3",
+        file_name="song2.mp3",
+        relative_path="song2.mp3",
+        file_size_bytes=2000,
+        status=ScanCandidateStatus.PENDING,
+    )
+    cand_repo.list_candidates.return_value = [cand1, cand2]
+    cat_repo.list_entries.return_value = []
+    cand_repo.delete_missing_candidates.return_value = 1
+    cand_repo.delete_candidates.return_value = 1
+
+    view = ScannerView(
+        candidate_repo=cand_repo,
+        catalog_repo=cat_repo,
+        matcher_service=matcher_service,
+        reconciler=reconciler,
+        settings_repo=settings_repo,
+    )
+
+    # Purge missing
+    view.purge_missing_candidates()
+    cand_repo.delete_missing_candidates.assert_called_once()
+
+    # Select row 1 (song2.mp3 with id 20)
+    view._cand_table.selectRow(1)
+    view._delete_selected_candidates()
+    cand_repo.delete_candidates.assert_called_with([20])

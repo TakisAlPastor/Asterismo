@@ -162,3 +162,49 @@ def test_match_crud_and_cascade_delete(db_with_v3: DatabaseManager, tmp_path: Pa
     assert deleted is True
     assert repo.get_candidate_by_id(candidate.id) is None
     assert len(repo.get_matches_for_candidate(candidate.id)) == 0
+
+
+def test_clear_matches_for_candidate(db_with_v3: DatabaseManager, tmp_path: Path) -> None:
+    """Verify clear_matches_for_candidate purges previous match history."""
+    repo = CandidateRepository(db_with_v3)
+    p = tmp_path / "song.mp3"
+    candidate = repo.upsert_candidate(p, "song.mp3", "song.mp3", 1000)
+
+    repo.add_match(
+        candidate_id=candidate.id,
+        matched_track="Old Match",
+        matched_database="db.pklz",
+        aligned_hashes=15,
+    )
+    assert len(repo.get_matches_for_candidate(candidate.id)) == 1
+
+    cleared = repo.clear_matches_for_candidate(candidate.id)
+    assert cleared == 1
+    assert len(repo.get_matches_for_candidate(candidate.id)) == 0
+
+
+def test_delete_candidates_batch_and_missing(db_with_v3: DatabaseManager, tmp_path: Path) -> None:
+    """Verify batch deletion and missing candidates deletion with cascade to scan_matches."""
+    repo = CandidateRepository(db_with_v3)
+    c1 = repo.upsert_candidate(tmp_path / "1.mp3", "1.mp3", "1.mp3", 100)
+    c2 = repo.upsert_candidate(tmp_path / "2.mp3", "2.mp3", "2.mp3", 200)
+    c3 = repo.upsert_candidate(tmp_path / "3.mp3", "3.mp3", "3.mp3", 300)
+
+    # Attach match to c2
+    repo.add_match(candidate_id=c2.id, matched_track="Ref", matched_database="db.pklz")
+
+    # Mark c2 and c3 missing
+    repo.mark_missing([c2.id, c3.id])
+
+    # Delete missing candidates
+    deleted_missing = repo.delete_missing_candidates()
+    assert deleted_missing == 2
+    assert repo.get_candidate_by_id(c2.id) is None
+    assert repo.get_candidate_by_id(c3.id) is None
+    assert len(repo.get_matches_for_candidate(c2.id)) == 0
+    assert repo.get_candidate_by_id(c1.id) is not None
+
+    # Delete batch
+    deleted_batch = repo.delete_candidates([c1.id])
+    assert deleted_batch == 1
+    assert repo.get_candidate_by_id(c1.id) is None

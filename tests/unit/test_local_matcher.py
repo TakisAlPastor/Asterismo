@@ -96,6 +96,56 @@ def test_match_hashes_against_database_hits(memory_db: DatabaseManager, tmp_path
         assert m.confidence == round(min(1.0, 18 / 30.0), 3)
 
 
+def test_match_hashes_deduplication_and_dominance_ratio(memory_db: DatabaseManager, tmp_path: Path) -> None:
+    """Verify multiple time alignments of same track are deduplicated and low-ratio hits discarded."""
+    repo = CandidateRepository(memory_db)
+    service = LocalMatcherService(candidate_repo=repo)
+
+    db_path = tmp_path / "album.pklz"
+    db_path.write_bytes(b"PKLZ")
+
+    query_hashes = np.array([[10, 100], [20, 200]])
+
+    with (
+        patch("hash_table.HashTable") as mock_ht_cls,
+        patch("audfprint_analyze.Analyzer") as mock_analyzer_cls,
+        patch("audfprint_match.Matcher") as mock_matcher_cls,
+    ):
+        mock_ht = MagicMock()
+        mock_ht.names = ["Wonderless", "Secondary Track"]
+        mock_ht_cls.return_value = mock_ht
+
+        mock_analyzer = MagicMock()
+        mock_analyzer.n_hop = 256
+        mock_analyzer.target_sr = 11025
+        mock_analyzer_cls.return_value = mock_analyzer
+
+        mock_matcher = MagicMock()
+        # Simulation: Hit 0 (Wonderless) has 3 alignments: 7536, 26, 12
+        # Hit 1 (Secondary Track) has 1 alignment: 8 hashes (< 7536 * 0.10)
+        mock_matcher.match_hashes.return_value = np.array([
+            [0, 7536, 0.0, 8000],
+            [0, 26, 50.0, 8000],
+            [0, 12, 100.0, 8000],
+            [1, 8, 20.0, 50],
+        ])
+        mock_matcher_cls.return_value = mock_matcher
+
+        matches = service.match_hashes_against_database(
+            query_hashes=query_hashes,
+            database_path=db_path,
+            candidate_id=1,
+            min_aligned_hashes=5,
+        )
+
+        # Wonderless must be deduplicated to only 1 hit (7536 hashes)
+        # Secondary Track (8 hashes) must be discarded by dominance ratio cutoff (8 < 7536 * 0.10)
+        assert len(matches) == 1
+        assert matches[0].matched_track == "Wonderless"
+        assert matches[0].aligned_hashes == 7536
+        assert mock_matcher.max_alignments_per_id == 1
+
+
 def test_match_single_candidate_early_stopping(memory_db: DatabaseManager, tmp_path: Path) -> None:
     """Verify that early stopping stops searching subsequent databases upon high confidence hit."""
     repo = CandidateRepository(memory_db)

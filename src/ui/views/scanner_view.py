@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from PySide6.QtCore import Qt, QThread, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -133,6 +135,10 @@ class ScannerView(QWidget):
         self._btn_refresh_cand.clicked.connect(self.reload_candidates)
         cand_toolbar.addWidget(self._btn_refresh_cand)
 
+        self._btn_purge_missing = QPushButton("Purge Missing", left_widget)
+        self._btn_purge_missing.clicked.connect(self.purge_missing_candidates)
+        cand_toolbar.addWidget(self._btn_purge_missing)
+
         left_layout.addLayout(cand_toolbar)
 
         # Candidate Table
@@ -143,6 +149,9 @@ class ScannerView(QWidget):
         self._cand_table.setAlternatingRowColors(True)
         self._cand_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._cand_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._cand_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._cand_table.customContextMenuRequested.connect(self._show_cand_context_menu)
+        self._cand_table.installEventFilter(self)
         header = self._cand_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -330,6 +339,55 @@ class ScannerView(QWidget):
         self._db_tree.blockSignals(False)
         self._update_selected_db_summary()
 
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Handle keyboard shortcuts such as Delete key on the candidate table."""
+        if watched == self._cand_table and event.type() == QEvent.Type.KeyPress:
+            if isinstance(event, QKeyEvent) and event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self._delete_selected_candidates()
+                return True
+        return super().eventFilter(watched, event)
+
+    @Slot(QPoint)
+    def _show_cand_context_menu(self, pos: QPoint) -> None:
+        """Display context menu to remove selected candidates."""
+        selected_rows = sorted(set(idx.row() for idx in self._cand_table.selectedIndexes()))
+        if not selected_rows:
+            return
+
+        menu = QMenu(self._cand_table)
+        action_remove = menu.addAction(f"Remove Candidate(s) ({len(selected_rows)})")
+        action = menu.exec(self._cand_table.viewport().mapToGlobal(pos))
+        if action == action_remove:
+            self._delete_selected_candidates()
+
+    @Slot()
+    def purge_missing_candidates(self) -> None:
+        """Delete all candidates marked as missing from the repository."""
+        deleted = self._candidate_repo.delete_missing_candidates()
+        if deleted > 0:
+            self.log_requested.emit(f"[-] Purged {deleted} missing candidate(s) from database.")
+        self.reload_candidates()
+
+    @Slot()
+    def _delete_selected_candidates(self) -> None:
+        """Delete selected candidate rows from persistent storage."""
+        selected_rows = sorted(set(idx.row() for idx in self._cand_table.selectedIndexes()))
+        if not selected_rows:
+            return
+
+        cand_ids: list[int] = []
+        for row in selected_rows:
+            cb_item = self._cand_table.item(row, 0)
+            if cb_item is not None:
+                cid = cb_item.data(Qt.ItemDataRole.UserRole)
+                if cid is not None:
+                    cand_ids.append(int(cid))
+
+        if cand_ids:
+            deleted = self._candidate_repo.delete_candidates(cand_ids)
+            self.log_requested.emit(f"[-] Removed {deleted} candidate(s) from database.")
+            self.reload_candidates()
+
     @Slot()
     def reload_candidates(self) -> None:
         """Scan configured input_audio_dir and refresh candidate table."""
@@ -498,7 +556,10 @@ class ScannerView(QWidget):
         for m in matches:
             m_row = self._matches_table.rowCount()
             self._matches_table.insertRow(m_row)
-            self._matches_table.setItem(m_row, 0, QTableWidgetItem(m.matched_track))
+            clean_track = Path(m.matched_track).name or m.matched_track
+            track_item = QTableWidgetItem(clean_track)
+            track_item.setToolTip(m.matched_track)
+            self._matches_table.setItem(m_row, 0, track_item)
             self._matches_table.setItem(m_row, 1, QTableWidgetItem(m.matched_database))
             self._matches_table.setItem(m_row, 2, QTableWidgetItem(str(m.aligned_hashes)))
             self._matches_table.setItem(m_row, 3, QTableWidgetItem(f"{m.offset_seconds:.2f}"))
