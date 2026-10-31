@@ -16,6 +16,14 @@ from src.core.config.constants import (
     DEFAULT_SPLIT_SEGMENT_SECONDS,
     DEFAULT_SPLIT_THRESHOLD_SECONDS,
     REDACTED_SECRET_PLACEHOLDER,
+    ALL_RECOGNITION_ENGINES,
+    ENGINE_NAME_AUDFPRINT,
+    ENGINE_NAME_SHAZAM,
+    ENGINE_NAME_ACOUSTID,
+    ENGINE_NAME_AUDIOTAG,
+    SHAZAM_REQUEST_DELAY_SECONDS,
+    ACOUSTID_LOOKUP_ENDPOINT,
+    AUDIOTAG_ENDPOINT,
 )
 from src.core.config.models import (
     LocalMatchResult,
@@ -340,15 +348,28 @@ def test_local_match_result_and_options(tmp_path: Path) -> None:
         stop_on_first_match=True,
         min_aligned_hashes=5,
         early_stop_threshold=15,
+        enabled_engines=(ENGINE_NAME_AUDFPRINT, ENGINE_NAME_SHAZAM),
     )
     assert options.stop_on_first_match is True
     assert len(options.target_databases) == 1
+    assert options.enabled_engines == (
+        ENGINE_NAME_AUDFPRINT, ENGINE_NAME_SHAZAM)
+
+    # Verify cloud recognition constants
+    assert SHAZAM_REQUEST_DELAY_SECONDS > 0
+    assert "acoustid.org" in ACOUSTID_LOOKUP_ENDPOINT
+    assert "audiotag.info" in AUDIOTAG_ENDPOINT
+    assert ENGINE_NAME_ACOUSTID in ALL_RECOGNITION_ENGINES
+    assert ENGINE_NAME_AUDIOTAG in ALL_RECOGNITION_ENGINES
 
     with pytest.raises(ConfigurationError, match="min_aligned_hashes must be >= 1"):
         MatchOptions(min_aligned_hashes=0)
 
     with pytest.raises(ConfigurationError, match="early_stop_threshold"):
         MatchOptions(min_aligned_hashes=20, early_stop_threshold=10)
+
+    with pytest.raises(ConfigurationError, match="Invalid engine in enabled_engines"):
+        MatchOptions(enabled_engines=("unsupported_engine",))
 
     result = LocalMatchResult(
         candidate_path=audio_path,

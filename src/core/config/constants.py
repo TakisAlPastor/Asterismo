@@ -193,3 +193,40 @@ AUDFPRINT_INTEGRITY_MARKERS: dict[str, str] = {
 # Winget Package IDs for anti-AV provisioning
 WINGET_FFMPEG_PACKAGE_ID: str = "Gyan.FFmpeg"
 WINGET_CHROMAPRINT_PACKAGE_ID: str = "AcoustID.Chromaprint"
+
+# Cloud Recognition Engines & Adapters
+ENGINE_NAME_AUDFPRINT: str = "audfprint"
+ENGINE_NAME_SHAZAM: str = "shazam"
+ENGINE_NAME_ACOUSTID: str = "acoustid"
+ENGINE_NAME_AUDIOTAG: str = "audiotag"
+ALL_RECOGNITION_ENGINES: tuple[str, ...] = (
+    ENGINE_NAME_AUDFPRINT,
+    ENGINE_NAME_SHAZAM,
+    ENGINE_NAME_ACOUSTID,
+    ENGINE_NAME_AUDIOTAG,
+)
+
+# Shazam Cloud Adapter Constants
+SHAZAM_REQUEST_DELAY_SECONDS: float = 1.5
+
+# AcoustID & MusicBrainz Adapter Constants
+ACOUSTID_LOOKUP_ENDPOINT: str = "https://api.acoustid.org/v2/lookup"
+ACOUSTID_TRACK_ENDPOINT: str = "https://acoustid.org/track"
+ACOUSTID_MIN_SCORE_THRESHOLD: float = 0.60
+ACOUSTID_RATE_LIMIT_DELAY_SECONDS: float = 0.60
+ACOUSTID_FPCALC_MAX_DURATION_SECONDS: int = 120
+ACOUSTID_BLACKLISTED_REGEX: str = r"^94765\d{3}$"
+
+# AudioTag Adapter Constants
+AUDIOTAG_ENDPOINT: str = "https://audiotag.info/api"
+AUDIOTAG_MIN_DURATION_SECONDS: float = 20.0
+AUDIOTAG_LOOP_TARGET_SECONDS: float = 25.0
+AUDIOTAG_POLL_INTERVAL_SECONDS: float = 0.50
+AUDIOTAG_MAX_POLL_ATTEMPTS: int = 50
+AUDIOTAG_COOLDOWN_MIN_SECONDS: float = 2.0
+AUDIOTAG_COOLDOWN_MAX_SECONDS: float = 5.0
+AUDIOTAG_ERROR_CREDIT_EXHAUSTED: str = "CREDIT_EXHAUSTED"
+AUDIOTAG_ERROR_KEY_INVALID: str = "KEY_INVALID"
+AUDIOTAG_STATUS_FOUND: str = "found"
+AUDIOTAG_STATUS_NOT_FOUND: str = "not found"
+AUDIOTAG_STATUS_WAIT: str = "wait"

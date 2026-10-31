@@ -22,6 +22,8 @@ from src.core.config.constants import (
     REDACTED_SECRET_PLACEHOLDER,
     LOCAL_MATCH_MIN_HASH_THRESHOLD,
     LOCAL_MATCH_EARLY_STOP_THRESHOLD,
+    ALL_RECOGNITION_ENGINES,
+    ENGINE_NAME_AUDFPRINT,
 )
 
 
@@ -570,6 +572,7 @@ class MatchOptions:
     stop_on_first_match: bool = False
     min_aligned_hashes: int = LOCAL_MATCH_MIN_HASH_THRESHOLD
     early_stop_threshold: int = LOCAL_MATCH_EARLY_STOP_THRESHOLD
+    enabled_engines: tuple[str, ...] = (ENGINE_NAME_AUDFPRINT,)
 
     def __post_init__(self) -> None:
         if self.min_aligned_hashes < 1:
@@ -579,4 +582,8 @@ class MatchOptions:
         if self.early_stop_threshold < self.min_aligned_hashes:
             raise ConfigurationError(
                 f"early_stop_threshold ({self.early_stop_threshold}) must be >= min_aligned_hashes ({self.min_aligned_hashes})"
+            )
+        if any(e not in ALL_RECOGNITION_ENGINES for e in self.enabled_engines):
+            raise ConfigurationError(
+                f"Invalid engine in enabled_engines: {self.enabled_engines}. Must be subset of {ALL_RECOGNITION_ENGINES}"
             )
