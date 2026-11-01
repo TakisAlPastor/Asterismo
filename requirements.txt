@@ -3,7 +3,7 @@ PySide6>=6.8.0
 
 # Asynchronous HTTP & Cloud Recognition Clients
 httpx>=0.28.0
-shazamio>=0.8.0
+shazamio>=0.9.0
 
 # Media Harvesting & Anti-Bot Impersonation
 yt-dlp>=2026.01.01
