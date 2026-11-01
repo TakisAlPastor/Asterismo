@@ -66,6 +66,16 @@ class MultiEngineMatcherService:
         self._local_matcher = local_matcher
         self._cloud_adapters = tuple(cloud_adapters)
 
+    @property
+    def local_matcher(self) -> LocalMatcherService | None:
+        """Return the configured local audfprint matcher service, if any."""
+        return self._local_matcher
+
+    @property
+    def cloud_adapters(self) -> tuple[RecognitionEngine, ...]:
+        """Return sequence of registered cloud recognition adapters."""
+        return self._cloud_adapters
+
     async def match_candidate(
         self,
         candidate: ScanCandidateRecord,

@@ -26,6 +26,10 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.config.constants import (
+    ENGINE_NAME_ACOUSTID,
+    ENGINE_NAME_AUDIOTAG,
+    ENGINE_NAME_AUDFPRINT,
+    ENGINE_NAME_SHAZAM,
     LOCAL_MATCH_EARLY_STOP_THRESHOLD,
     LOCAL_MATCH_MIN_HASH_THRESHOLD,
 )
@@ -36,11 +40,17 @@ from src.core.config.models import (
     ScanCandidateStatus,
     ScanMatchRecord,
 )
+from src.core.config.secrets_store import SecretsStore
 from src.core.database.candidate_repository import CandidateRepository
 from src.core.database.catalog_repository import CatalogRepository
 from src.core.database.settings_repository import SettingsRepository
+from src.core.matcher.adapters.acoustid_adapter import AcoustIDAdapter
+from src.core.matcher.adapters.audiotag_adapter import AudioTagAdapter
+from src.core.matcher.adapters.base import RecognitionEngine
+from src.core.matcher.adapters.shazam_adapter import ShazamAdapter
 from src.core.matcher.candidate_reconciler import CandidateReconciler
 from src.core.matcher.local_matcher import LocalMatcherService
+from src.core.matcher.multi_matcher import MultiEngineMatcherService
 from src.ui.theme import (
     CARD_BORDER_RADIUS,
     FONT_SIZE_BODY,
@@ -52,7 +62,7 @@ from src.ui.theme import (
     LAYOUT_SPACING_SMALL,
     LAYOUT_SPACING_STD,
 )
-from src.ui.workers.matcher_worker import LocalMatcherWorker
+from src.ui.workers.matcher_worker import LocalMatcherWorker, MatcherWorker
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +76,7 @@ def _format_duration(seconds: float | None) -> str:
 
 
 class ScannerView(QWidget):
-    """View managing candidate audio selection, target database filtering, and local identification scans (US-3.2)."""
+    """View managing candidate audio selection, target database filtering, and multi-engine identification scans (US-3.2, US-4.2)."""
 
     log_requested = Signal(str)
 
@@ -74,9 +84,10 @@ class ScannerView(QWidget):
         self,
         candidate_repo: CandidateRepository,
         catalog_repo: CatalogRepository,
-        matcher_service: LocalMatcherService,
+        matcher_service: MultiEngineMatcherService | LocalMatcherService,
         reconciler: CandidateReconciler,
         settings_repo: SettingsRepository,
+        secrets_store: SecretsStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -85,20 +96,32 @@ class ScannerView(QWidget):
         self._matcher_service = matcher_service
         self._reconciler = reconciler
         self._settings_repo = settings_repo
+        self._secrets_store = secrets_store
+        self._multi_matcher: MultiEngineMatcherService | None = (
+            matcher_service if isinstance(
+                matcher_service, MultiEngineMatcherService) else None
+        )
 
         self._candidates: list[ScanCandidateRecord] = []
         self._catalog_entries: list[PklzCatalogEntry] = []
         self._worker_thread: QThread | None = None
-        self._worker: LocalMatcherWorker | None = None
+        self._worker: MatcherWorker | None = None
 
         self._init_ui()
         self.reload_databases()
         self.reload_candidates()
+        self.refresh_credential_status()
+
+    def showEvent(self, event: QEvent) -> None:
+        """Refresh credential badges whenever the view becomes visible."""
+        super().showEvent(event)
+        self.refresh_credential_status()
 
     def _init_ui(self) -> None:
         """Construct layout and child widgets."""
         root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD)
+        root_layout.setContentsMargins(
+            LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD)
         root_layout.setSpacing(LAYOUT_SPACING_STD)
 
         # 1. Header & Controls Card
@@ -119,16 +142,20 @@ class ScannerView(QWidget):
         cand_toolbar.addWidget(QLabel("Candidate Audio Tracks:", left_widget))
 
         self._cand_filter_combo = QLineEdit(left_widget)
-        self._cand_filter_combo.setPlaceholderText("Filter candidate tracks...")
-        self._cand_filter_combo.textChanged.connect(self._apply_candidate_filter)
+        self._cand_filter_combo.setPlaceholderText(
+            "Filter candidate tracks...")
+        self._cand_filter_combo.textChanged.connect(
+            self._apply_candidate_filter)
         cand_toolbar.addWidget(self._cand_filter_combo, 1)
 
         self._btn_select_all_cand = QPushButton("Select All", left_widget)
         self._btn_select_all_cand.clicked.connect(self._select_all_candidates)
         cand_toolbar.addWidget(self._btn_select_all_cand)
 
-        self._btn_select_unscanned = QPushButton("Select Unscanned", left_widget)
-        self._btn_select_unscanned.clicked.connect(self._select_unscanned_candidates)
+        self._btn_select_unscanned = QPushButton(
+            "Select Unscanned", left_widget)
+        self._btn_select_unscanned.clicked.connect(
+            self._select_unscanned_candidates)
         cand_toolbar.addWidget(self._btn_select_unscanned)
 
         self._btn_refresh_cand = QPushButton("Refresh Files", left_widget)
@@ -147,10 +174,14 @@ class ScannerView(QWidget):
             ["Target", "Status", "Filename", "Duration", "Quick Scanned", "Matches"]
         )
         self._cand_table.setAlternatingRowColors(True)
-        self._cand_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._cand_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._cand_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._cand_table.customContextMenuRequested.connect(self._show_cand_context_menu)
+        self._cand_table.setSelectionBehavior(
+            QTableWidget.SelectionBehavior.SelectRows)
+        self._cand_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers)
+        self._cand_table.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self._cand_table.customContextMenuRequested.connect(
+            self._show_cand_context_menu)
         self._cand_table.installEventFilter(self)
         header = self._cand_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -159,26 +190,37 @@ class ScannerView(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self._cand_table.itemSelectionChanged.connect(self._on_candidate_selected)
+        self._cand_table.itemSelectionChanged.connect(
+            self._on_candidate_selected)
         left_layout.addWidget(self._cand_table, 2)
 
         # Bottom Sub-Table: Match Hits for selected candidate
-        self._matches_title = QLabel("Detected Hits (Select a candidate to view matches):", left_widget)
-        self._matches_title.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; font-weight: bold; color: #94a3b8;")
+        self._matches_title = QLabel(
+            "Detected Hits (Select a candidate to view matches):", left_widget)
+        self._matches_title.setStyleSheet(
+            f"font-size: {FONT_SIZE_SMALL}px; font-weight: bold; color: #94a3b8;")
         left_layout.addWidget(self._matches_title)
 
-        self._matches_table = QTableWidget(0, 5, left_widget)
+        self._matches_table = QTableWidget(0, 6, left_widget)
         self._matches_table.setHorizontalHeaderLabels(
-            ["Matched Title", "Source Database", "Aligned Hashes", "Offset (s)", "Confidence"]
+            ["Engine", "Matched Title", "Source Database",
+                "Aligned / Details", "Offset (s)", "Confidence"]
         )
         self._matches_table.setAlternatingRowColors(True)
-        self._matches_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._matches_table.setEditTriggers(
+            QTableWidget.EditTrigger.NoEditTriggers)
         m_header = self._matches_table.horizontalHeader()
-        m_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        m_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        m_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        m_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        m_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        m_header.setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents)
+        m_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        m_header.setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents)
+        m_header.setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents)
+        m_header.setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents)
+        m_header.setSectionResizeMode(
+            5, QHeaderView.ResizeMode.ResizeToContents)
         left_layout.addWidget(self._matches_table, 1)
 
         main_splitter.addWidget(left_widget)
@@ -187,11 +229,13 @@ class ScannerView(QWidget):
         right_widget = QFrame(main_splitter)
         right_widget.setObjectName("card")
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD)
+        right_layout.setContentsMargins(
+            LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD, LAYOUT_MARGIN_STD)
         right_layout.setSpacing(LAYOUT_SPACING_SMALL)
 
         right_title = QLabel("Target .pklz Databases", right_widget)
-        right_title.setStyleSheet(f"font-size: {FONT_SIZE_SUBHEADER}px; font-weight: bold;")
+        right_title.setStyleSheet(
+            f"font-size: {FONT_SIZE_SUBHEADER}px; font-weight: bold;")
         right_layout.addWidget(right_title)
 
         db_actions_layout = QHBoxLayout()
@@ -200,7 +244,8 @@ class ScannerView(QWidget):
         db_actions_layout.addWidget(self._btn_select_all_dbs)
 
         self._btn_deselect_all_dbs = QPushButton("Deselect All", right_widget)
-        self._btn_deselect_all_dbs.clicked.connect(self._deselect_all_databases)
+        self._btn_deselect_all_dbs.clicked.connect(
+            self._deselect_all_databases)
         db_actions_layout.addWidget(self._btn_deselect_all_dbs)
 
         self._btn_refresh_dbs = QPushButton("Refresh", right_widget)
@@ -212,12 +257,15 @@ class ScannerView(QWidget):
         self._db_tree = QTreeWidget(right_widget)
         self._db_tree.setHeaderLabels(["Database / Collection", "Tracks"])
         self._db_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._db_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._db_tree.header().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents)
         self._db_tree.itemChanged.connect(self._on_db_tree_item_changed)
         right_layout.addWidget(self._db_tree, 1)
 
-        self._selected_dbs_summary_label = QLabel("Selected: 0 databases (0 tracks)", right_widget)
-        self._selected_dbs_summary_label.setStyleSheet("color: #94a3b8; font-weight: 600;")
+        self._selected_dbs_summary_label = QLabel(
+            "Selected: 0 databases (0 tracks)", right_widget)
+        self._selected_dbs_summary_label.setStyleSheet(
+            "color: #94a3b8; font-weight: 600;")
         right_layout.addWidget(self._selected_dbs_summary_label)
 
         main_splitter.addWidget(right_widget)
@@ -231,13 +279,16 @@ class ScannerView(QWidget):
         layout.setSpacing(2)
 
         title = QLabel("Multi-Engine Scanner", header_widget)
-        title.setStyleSheet(f"font-size: {FONT_SIZE_TITLE}px; font-weight: bold;")
+        title.setStyleSheet(
+            f"font-size: {FONT_SIZE_TITLE}px; font-weight: bold;")
         layout.addWidget(title)
 
         subtitle = QLabel(
-            "Local audfprint acoustic landmark matching against indexed reference databases.", header_widget
+            "Multi-engine identification across local audfprint landmark databases and native cloud APIs (Shazam, AcoustID, AudioTag).",
+            header_widget,
         )
-        subtitle.setStyleSheet(f"font-size: {FONT_SIZE_BODY}px; color: #94a3b8;")
+        subtitle.setStyleSheet(
+            f"font-size: {FONT_SIZE_BODY}px; color: #94a3b8;")
         layout.addWidget(subtitle)
 
         parent_layout.addWidget(header_widget)
@@ -253,13 +304,14 @@ class ScannerView(QWidget):
         top_row.setSpacing(LAYOUT_SPACING_STD)
 
         # Mode Selection
-        self._radio_quick_scan = QRadioButton("Quick Scan (Raw Audio)", controls_frame)
+        self._radio_quick_scan = QRadioButton(
+            "Quick Scan (Raw Audio)", controls_frame)
         self._radio_quick_scan.setChecked(True)
         top_row.addWidget(self._radio_quick_scan)
 
         # Early Stop Checkbox
         self._cb_early_stop = QCheckBox(
-            f"Stop track on first high-confidence match (>= {LOCAL_MATCH_EARLY_STOP_THRESHOLD} hashes)",
+            "Stop track on first match (cascade early-stop)",
             controls_frame,
         )
         self._cb_early_stop.setChecked(True)
@@ -268,7 +320,7 @@ class ScannerView(QWidget):
         top_row.addStretch(1)
 
         # Scan Execution Buttons
-        self._btn_start_scan = QPushButton("Start Local Scan", controls_frame)
+        self._btn_start_scan = QPushButton("Start Scan", controls_frame)
         self._btn_start_scan.setObjectName("primary_button")
         self._btn_start_scan.clicked.connect(self.start_scan)
         top_row.addWidget(self._btn_start_scan)
@@ -279,6 +331,34 @@ class ScannerView(QWidget):
         top_row.addWidget(self._btn_cancel_scan)
 
         layout.addLayout(top_row)
+
+        # Engines Row
+        engines_row = QHBoxLayout()
+        engines_row.setSpacing(LAYOUT_SPACING_STD)
+        engines_label = QLabel("Engines:", controls_frame)
+        engines_label.setStyleSheet("font-weight: bold;")
+        engines_row.addWidget(engines_label)
+
+        self._cb_engine_local = QCheckBox("Local .pklz", controls_frame)
+        self._cb_engine_local.setChecked(True)
+        engines_row.addWidget(self._cb_engine_local)
+
+        self._cb_engine_shazam = QCheckBox("Shazam", controls_frame)
+        self._cb_engine_shazam.setChecked(True)
+        engines_row.addWidget(self._cb_engine_shazam)
+
+        self._cb_engine_acoustid = QCheckBox("AcoustID", controls_frame)
+        engines_row.addWidget(self._cb_engine_acoustid)
+        self._badge_acoustid = QLabel(controls_frame)
+        engines_row.addWidget(self._badge_acoustid)
+
+        self._cb_engine_audiotag = QCheckBox("AudioTag", controls_frame)
+        engines_row.addWidget(self._cb_engine_audiotag)
+        self._badge_audiotag = QLabel(controls_frame)
+        engines_row.addWidget(self._badge_audiotag)
+
+        engines_row.addStretch(1)
+        layout.addLayout(engines_row)
 
         # Status and Progress
         status_row = QHBoxLayout()
@@ -295,6 +375,106 @@ class ScannerView(QWidget):
 
         parent_layout.addWidget(controls_frame)
 
+    def refresh_credential_status(self) -> None:
+        """Inspect secrets and update engine checkboxes and status badges."""
+        secrets = self._secrets_store.load() if self._secrets_store else None
+
+        # AcoustID
+        has_acoustid = bool(
+            secrets and secrets.acoustid_api_key and secrets.acoustid_api_key.strip())
+        if has_acoustid:
+            self._badge_acoustid.setText("Configured")
+            self._badge_acoustid.setStyleSheet(
+                "color: #4ade80; font-size: 11px; font-weight: bold;")
+            if not self._cb_engine_acoustid.isEnabled():
+                self._cb_engine_acoustid.setEnabled(True)
+                self._cb_engine_acoustid.setChecked(True)
+            self._cb_engine_acoustid.setToolTip(
+                "AcoustID fingerprint lookup enabled.")
+        else:
+            self._badge_acoustid.setText("Key Missing")
+            self._badge_acoustid.setStyleSheet(
+                "color: #f59e0b; font-size: 11px;")
+            self._cb_engine_acoustid.setEnabled(False)
+            self._cb_engine_acoustid.setChecked(False)
+            self._cb_engine_acoustid.setToolTip(
+                "AcoustID API key not configured in Settings.")
+
+        # AudioTag
+        is_exhausted = False
+        if self._multi_matcher:
+            for adapter in self._multi_matcher.cloud_adapters:
+                if getattr(adapter, "engine_name", None) == ENGINE_NAME_AUDIOTAG:
+                    is_exhausted = getattr(adapter, "quota_exhausted", False)
+                    break
+
+        has_audiotag = bool(
+            secrets and secrets.audiotag_api_key and secrets.audiotag_api_key.strip())
+        if is_exhausted:
+            self._badge_audiotag.setText("Quota Exhausted")
+            self._badge_audiotag.setStyleSheet(
+                "color: #ef4444; font-size: 11px; font-weight: bold;")
+            self._cb_engine_audiotag.setEnabled(False)
+            self._cb_engine_audiotag.setChecked(False)
+            self._cb_engine_audiotag.setToolTip(
+                "AudioTag API credit balance exhausted.")
+        elif has_audiotag:
+            self._badge_audiotag.setText("Configured")
+            self._badge_audiotag.setStyleSheet(
+                "color: #4ade80; font-size: 11px; font-weight: bold;")
+            if not self._cb_engine_audiotag.isEnabled():
+                self._cb_engine_audiotag.setEnabled(True)
+                self._cb_engine_audiotag.setChecked(True)
+            self._cb_engine_audiotag.setToolTip(
+                "AudioTag cloud recognition enabled.")
+        else:
+            self._badge_audiotag.setText("Key Missing")
+            self._badge_audiotag.setStyleSheet(
+                "color: #f59e0b; font-size: 11px;")
+            self._cb_engine_audiotag.setEnabled(False)
+            self._cb_engine_audiotag.setChecked(False)
+            self._cb_engine_audiotag.setToolTip(
+                "AudioTag API key not configured in Settings.")
+
+    def get_enabled_engines(self) -> tuple[str, ...]:
+        """Return sequence of engine identifiers currently enabled in the UI."""
+        engines: list[str] = []
+        if self._cb_engine_local.isChecked():
+            engines.append(ENGINE_NAME_AUDFPRINT)
+        if self._cb_engine_shazam.isChecked():
+            engines.append(ENGINE_NAME_SHAZAM)
+        if self._cb_engine_acoustid.isChecked() and self._cb_engine_acoustid.isEnabled():
+            engines.append(ENGINE_NAME_ACOUSTID)
+        if self._cb_engine_audiotag.isChecked() and self._cb_engine_audiotag.isEnabled():
+            engines.append(ENGINE_NAME_AUDIOTAG)
+        return tuple(engines)
+
+    def _get_active_matcher_service(self) -> MultiEngineMatcherService | LocalMatcherService:
+        """Resolve or build MultiEngineMatcherService with the latest configured adapters."""
+        if isinstance(self._matcher_service, MultiEngineMatcherService):
+            return self._matcher_service
+
+        secrets = self._secrets_store.load() if self._secrets_store else None
+        cloud_adapters: list[RecognitionEngine] = [ShazamAdapter()]
+        if secrets and secrets.acoustid_api_key and secrets.acoustid_api_key.strip():
+            cloud_adapters.append(AcoustIDAdapter(
+                api_key=secrets.acoustid_api_key.strip()))
+        if secrets and secrets.audiotag_api_key and secrets.audiotag_api_key.strip():
+            cloud_adapters.append(AudioTagAdapter(
+                api_key=secrets.audiotag_api_key.strip()))
+
+        local_matcher = (
+            self._matcher_service
+            if isinstance(self._matcher_service, LocalMatcherService)
+            else None
+        )
+        self._multi_matcher = MultiEngineMatcherService(
+            candidate_repo=self._candidate_repo,
+            local_matcher=local_matcher,
+            cloud_adapters=cloud_adapters,
+        )
+        return self._multi_matcher
+
     # ------------------- Data Loading & Population -------------------
 
     @Slot()
@@ -309,9 +489,11 @@ class ScannerView(QWidget):
             groups.setdefault(entry.prefix_label, []).append(entry)
 
         for prefix, entries in sorted(groups.items()):
-            valid_tracks = sum(e.track_count for e in entries if e.file_path.is_file())
+            valid_tracks = sum(
+                e.track_count for e in entries if e.file_path.is_file())
             parent_item = QTreeWidgetItem([prefix, f"{valid_tracks:,} tracks"])
-            parent_item.setFlags(parent_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
+            parent_item.setFlags(parent_item.flags(
+            ) | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
             parent_item.setCheckState(0, Qt.CheckState.Checked)
 
             has_valid_child = False
@@ -326,7 +508,8 @@ class ScannerView(QWidget):
                 else:
                     child.setCheckState(0, Qt.CheckState.Unchecked)
                     child.setForeground(0, Qt.GlobalColor.red)
-                    child.setToolTip(0, f"File missing from disk: {e.file_path}")
+                    child.setToolTip(
+                        0, f"File missing from disk: {e.file_path}")
                 child.setData(0, Qt.ItemDataRole.UserRole, str(e.file_path))
                 parent_item.addChild(child)
 
@@ -350,12 +533,14 @@ class ScannerView(QWidget):
     @Slot(QPoint)
     def _show_cand_context_menu(self, pos: QPoint) -> None:
         """Display context menu to remove selected candidates."""
-        selected_rows = sorted(set(idx.row() for idx in self._cand_table.selectedIndexes()))
+        selected_rows = sorted(set(idx.row()
+                               for idx in self._cand_table.selectedIndexes()))
         if not selected_rows:
             return
 
         menu = QMenu(self._cand_table)
-        action_remove = menu.addAction(f"Remove Candidate(s) ({len(selected_rows)})")
+        action_remove = menu.addAction(
+            f"Remove Candidate(s) ({len(selected_rows)})")
         action = menu.exec(self._cand_table.viewport().mapToGlobal(pos))
         if action == action_remove:
             self._delete_selected_candidates()
@@ -365,13 +550,15 @@ class ScannerView(QWidget):
         """Delete all candidates marked as missing from the repository."""
         deleted = self._candidate_repo.delete_missing_candidates()
         if deleted > 0:
-            self.log_requested.emit(f"[-] Purged {deleted} missing candidate(s) from database.")
+            self.log_requested.emit(
+                f"[-] Purged {deleted} missing candidate(s) from database.")
         self.reload_candidates()
 
     @Slot()
     def _delete_selected_candidates(self) -> None:
         """Delete selected candidate rows from persistent storage."""
-        selected_rows = sorted(set(idx.row() for idx in self._cand_table.selectedIndexes()))
+        selected_rows = sorted(set(idx.row()
+                               for idx in self._cand_table.selectedIndexes()))
         if not selected_rows:
             return
 
@@ -385,7 +572,8 @@ class ScannerView(QWidget):
 
         if cand_ids:
             deleted = self._candidate_repo.delete_candidates(cand_ids)
-            self.log_requested.emit(f"[-] Removed {deleted} candidate(s) from database.")
+            self.log_requested.emit(
+                f"[-] Removed {deleted} candidate(s) from database.")
             self.reload_candidates()
 
     @Slot()
@@ -395,7 +583,8 @@ class ScannerView(QWidget):
         input_dir = settings.paths.input_dir
         if input_dir.is_dir():
             try:
-                self._reconciler.reconcile_directory(input_dir, probe_durations=False)
+                self._reconciler.reconcile_directory(
+                    input_dir, probe_durations=False)
             except Exception as exc:
                 logger.warning("Error reconciling candidates: %s", exc)
 
@@ -417,8 +606,10 @@ class ScannerView(QWidget):
 
             # Checkbox item
             cb_item = QTableWidgetItem()
-            cb_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            cb_item.setCheckState(Qt.CheckState.Checked if cand.status != ScanCandidateStatus.MISSING else Qt.CheckState.Unchecked)
+            cb_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable |
+                             Qt.ItemFlag.ItemIsEnabled)
+            cb_item.setCheckState(Qt.CheckState.Checked if cand.status !=
+                                  ScanCandidateStatus.MISSING else Qt.CheckState.Unchecked)
             cb_item.setData(Qt.ItemDataRole.UserRole, cand.id)
             self._cand_table.setItem(row, 0, cb_item)
 
@@ -438,14 +629,17 @@ class ScannerView(QWidget):
             self._cand_table.setItem(row, 2, name_item)
 
             # Duration
-            self._cand_table.setItem(row, 3, QTableWidgetItem(_format_duration(cand.duration_seconds)))
+            self._cand_table.setItem(row, 3, QTableWidgetItem(
+                _format_duration(cand.duration_seconds)))
 
             # Quick Scanned
-            quick_text = cand.quick_scanned_at[:19] if cand.quick_scanned_at else "-"
+            quick_text = cand.quick_scanned_at[:
+                                               19] if cand.quick_scanned_at else "-"
             self._cand_table.setItem(row, 4, QTableWidgetItem(quick_text))
 
             # Matches Count
-            matches = self._candidate_repo.get_matches_for_candidate(cand.id) if cand.id else []
+            matches = self._candidate_repo.get_matches_for_candidate(
+                cand.id) if cand.id else []
             match_item = QTableWidgetItem(str(len(matches)))
             if matches:
                 match_item.setForeground(Qt.GlobalColor.cyan)
@@ -536,7 +730,8 @@ class ScannerView(QWidget):
         selected_rows = self._cand_table.selectionModel().selectedRows()
         if not selected_rows:
             self._matches_table.setRowCount(0)
-            self._matches_title.setText("Detected Hits (Select a candidate to view matches):")
+            self._matches_title.setText(
+                "Detected Hits (Select a candidate to view matches):")
             return
 
         row = selected_rows[0].row()
@@ -550,39 +745,82 @@ class ScannerView(QWidget):
             return
 
         matches = self._candidate_repo.get_matches_for_candidate(cand_id)
-        self._matches_title.setText(f"Detected Hits for '{cand.file_name}' ({len(matches)} matches):")
+        self._matches_title.setText(
+            f"Detected Hits for '{cand.file_name}' ({len(matches)} matches):")
         self._matches_table.setRowCount(0)
 
         for m in matches:
             m_row = self._matches_table.rowCount()
             self._matches_table.insertRow(m_row)
+
+            # 0: Engine
+            engine_str = (m.engine or ENGINE_NAME_AUDFPRINT).upper()
+            engine_item = QTableWidgetItem(engine_str)
+            if engine_str == "AUDFPRINT":
+                engine_item.setForeground(Qt.GlobalColor.cyan)
+            elif engine_str == "SHAZAM":
+                engine_item.setForeground(Qt.GlobalColor.magenta)
+            elif engine_str == "ACOUSTID":
+                engine_item.setForeground(Qt.GlobalColor.yellow)
+            else:
+                engine_item.setForeground(Qt.GlobalColor.green)
+            self._matches_table.setItem(m_row, 0, engine_item)
+
+            # 1: Matched Title
             clean_track = Path(m.matched_track).name or m.matched_track
             track_item = QTableWidgetItem(clean_track)
             track_item.setToolTip(m.matched_track)
-            self._matches_table.setItem(m_row, 0, track_item)
-            self._matches_table.setItem(m_row, 1, QTableWidgetItem(m.matched_database))
-            self._matches_table.setItem(m_row, 2, QTableWidgetItem(str(m.aligned_hashes)))
-            self._matches_table.setItem(m_row, 3, QTableWidgetItem(f"{m.offset_seconds:.2f}"))
-            self._matches_table.setItem(m_row, 4, QTableWidgetItem(f"{m.confidence:.1%}"))
+            self._matches_table.setItem(m_row, 1, track_item)
+
+            # 2: Source Database
+            self._matches_table.setItem(
+                m_row, 2, QTableWidgetItem(m.matched_database))
+
+            # 3: Aligned / Details
+            if m.engine == ENGINE_NAME_AUDFPRINT:
+                details_text = f"{m.aligned_hashes} hashes"
+            else:
+                details_text = m.details_json or "-"
+            self._matches_table.setItem(
+                m_row, 3, QTableWidgetItem(details_text))
+
+            # 4: Offset (s)
+            offset_text = f"{m.offset_seconds:.2f}" if m.offset_seconds is not None else "-"
+            self._matches_table.setItem(
+                m_row, 4, QTableWidgetItem(offset_text))
+
+            # 5: Confidence
+            self._matches_table.setItem(
+                m_row, 5, QTableWidgetItem(f"{m.confidence:.1%}"))
 
     # ------------------- Scan Orchestration Lifecycle -------------------
 
     @Slot()
     def start_scan(self) -> None:
-        """Initiate background acoustic matching worker."""
+        """Initiate background acoustic matching worker across configured engines."""
         if self._worker_thread is not None and self._worker_thread.isRunning():
             return
 
         selected_candidates = self.get_selected_candidates()
         if not selected_candidates:
             self._status_label.setText("No candidates selected.")
-            self.log_requested.emit("[!] Scan aborted: No candidate audio tracks selected.")
+            self.log_requested.emit(
+                "[!] Scan aborted: No candidate audio tracks selected.")
+            return
+
+        enabled_engines = self.get_enabled_engines()
+        if not enabled_engines:
+            self._status_label.setText("No recognition engines selected.")
+            self.log_requested.emit(
+                "[!] Scan aborted: At least one recognition engine must be enabled.")
             return
 
         selected_dbs = self.get_selected_database_paths()
-        if not selected_dbs:
-            self._status_label.setText("No target databases selected.")
-            self.log_requested.emit("[!] Scan aborted: At least one target .pklz database must be selected.")
+        if ENGINE_NAME_AUDFPRINT in enabled_engines and not selected_dbs:
+            self._status_label.setText(
+                "No target databases selected for Local matching.")
+            self.log_requested.emit(
+                "[!] Scan aborted: At least one target .pklz database must be selected when Local engine is enabled.")
             return
 
         options = MatchOptions(
@@ -590,6 +828,7 @@ class ScannerView(QWidget):
             stop_on_first_match=self._cb_early_stop.isChecked(),
             min_aligned_hashes=LOCAL_MATCH_MIN_HASH_THRESHOLD,
             early_stop_threshold=LOCAL_MATCH_EARLY_STOP_THRESHOLD,
+            enabled_engines=enabled_engines,
         )
 
         self._btn_start_scan.setEnabled(False)
@@ -597,9 +836,11 @@ class ScannerView(QWidget):
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
 
+        matcher_to_use = self._get_active_matcher_service()
+
         self._worker_thread = QThread(self)
-        self._worker = LocalMatcherWorker(
-            matcher_service=self._matcher_service,
+        self._worker = MatcherWorker(
+            matcher_service=matcher_to_use,
             candidates=selected_candidates,
             target_databases=selected_dbs,
             options=options,
@@ -641,7 +882,8 @@ class ScannerView(QWidget):
     def _on_scan_completed(self, results: list) -> None:
         """Process scan completion event."""
         self.reload_candidates()
-        self._status_label.setText(f"Scan finished. Processed {len(results)} tracks.")
+        self._status_label.setText(
+            f"Scan finished. Processed {len(results)} tracks.")
 
     @Slot()
     def _on_worker_teardown(self) -> None:
@@ -651,3 +893,4 @@ class ScannerView(QWidget):
         self._btn_start_scan.setEnabled(True)
         self._btn_cancel_scan.setEnabled(False)
         self._progress_bar.setVisible(False)
+        self.refresh_credential_status()

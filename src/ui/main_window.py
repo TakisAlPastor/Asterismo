@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
                 matcher_service=self._matcher_service,
                 reconciler=self._candidate_reconciler,
                 settings_repo=self._settings_repo,
+                secrets_store=self._secrets_store,
                 parent=self._view_stack,
             )
             self._scanner_placeholder = None

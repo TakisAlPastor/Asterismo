@@ -3,9 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
+from src.core.config.constants import (
+    ENGINE_NAME_ACOUSTID,
+    ENGINE_NAME_AUDIOTAG,
+    ENGINE_NAME_AUDFPRINT,
+    ENGINE_NAME_SHAZAM,
+)
 from src.core.config.models import (
     AppSettings,
     LocalMatchResult,
@@ -17,6 +23,8 @@ from src.core.config.models import (
     SecretCredentials,
     WorkspacePaths,
 )
+from src.core.config.secrets_store import SecretsStore
+from src.core.matcher.multi_matcher import MultiEngineMatcherService
 from src.core.database.candidate_repository import CandidateRepository
 from src.core.database.catalog_repository import CatalogRepository
 from src.core.database.settings_repository import SettingsRepository
@@ -258,11 +266,12 @@ def test_scanner_view_match_inspector(qapp: QApplication, tmp_path: Path) -> Non
     # Select row 0
     view._cand_table.selectRow(0)
     assert view._matches_table.rowCount() == 1
-    assert view._matches_table.item(0, 0).text() == "Mysterious Song"
-    assert view._matches_table.item(0, 1).text() == "synthwave.pklz"
-    assert view._matches_table.item(0, 2).text() == "45"
-    assert view._matches_table.item(0, 3).text() == "12.34"
-    assert "95.0%" in view._matches_table.item(0, 4).text()
+    assert view._matches_table.item(0, 0).text() == "AUDFPRINT"
+    assert view._matches_table.item(0, 1).text() == "Mysterious Song"
+    assert view._matches_table.item(0, 2).text() == "synthwave.pklz"
+    assert view._matches_table.item(0, 3).text() == "45 hashes"
+    assert view._matches_table.item(0, 4).text() == "12.34"
+    assert "95.0%" in view._matches_table.item(0, 5).text()
 
 
 def test_matcher_worker_lifecycle(tmp_path: Path) -> None:
@@ -403,8 +412,10 @@ def test_scanner_view_missing_databases_and_refresh_button(qapp: QApplication, t
     missing_db = tmp_path / "ghost.pklz"
 
     cat_repo.list_entries.return_value = [
-        PklzCatalogEntry(file_path=existing_db, file_name="valid.pklz", prefix_label="Lib", track_count=10),
-        PklzCatalogEntry(file_path=missing_db, file_name="ghost.pklz", prefix_label="Lib", track_count=5),
+        PklzCatalogEntry(file_path=existing_db, file_name="valid.pklz",
+                         prefix_label="Lib", track_count=10),
+        PklzCatalogEntry(file_path=missing_db, file_name="ghost.pklz",
+                         prefix_label="Lib", track_count=5),
     ]
     cand_repo.list_candidates.return_value = []
 
@@ -491,3 +502,230 @@ def test_scanner_view_purge_missing_and_delete_selected(qapp: QApplication, tmp_
     view._cand_table.selectRow(1)
     view._delete_selected_candidates()
     cand_repo.delete_candidates.assert_called_with([20])
+
+
+def test_scanner_view_engine_checkboxes_and_credential_badges(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify engine checkboxes and live badges reflect configured/missing credentials."""
+    (
+        cand_repo,
+        cat_repo,
+        matcher_service,
+        reconciler,
+        settings_repo,
+    ) = _create_mock_repos(tmp_path)
+    cand_repo.list_candidates.return_value = []
+    cat_repo.list_entries.return_value = []
+
+    mock_secrets_store = MagicMock(spec=SecretsStore)
+
+    # 1. Missing credentials: both AcoustID and AudioTag disabled with Key Missing badge
+    mock_secrets_store.load.return_value = SecretCredentials()
+    view = ScannerView(
+        candidate_repo=cand_repo,
+        catalog_repo=cat_repo,
+        matcher_service=matcher_service,
+        reconciler=reconciler,
+        settings_repo=settings_repo,
+        secrets_store=mock_secrets_store,
+    )
+
+    assert view._cb_engine_local.isChecked() is True
+    assert view._cb_engine_shazam.isChecked() is True
+
+    assert view._cb_engine_acoustid.isEnabled() is False
+    assert view._cb_engine_acoustid.isChecked() is False
+    assert view._badge_acoustid.text() == "Key Missing"
+
+    assert view._cb_engine_audiotag.isEnabled() is False
+    assert view._cb_engine_audiotag.isChecked() is False
+    assert view._badge_audiotag.text() == "Key Missing"
+
+    assert view.get_enabled_engines() == (ENGINE_NAME_AUDFPRINT, ENGINE_NAME_SHAZAM)
+
+    # 2. Configured credentials: both enabled and checked
+    mock_secrets_store.load.return_value = SecretCredentials(
+        acoustid_api_key="acoustid-123",
+        audiotag_api_key="audiotag-456",
+    )
+    view.refresh_credential_status()
+
+    assert view._cb_engine_acoustid.isEnabled() is True
+    assert view._cb_engine_acoustid.isChecked() is True
+    assert view._badge_acoustid.text() == "Configured"
+
+    assert view._cb_engine_audiotag.isEnabled() is True
+    assert view._cb_engine_audiotag.isChecked() is True
+    assert view._badge_audiotag.text() == "Configured"
+
+    assert view.get_enabled_engines() == (
+        ENGINE_NAME_AUDFPRINT,
+        ENGINE_NAME_SHAZAM,
+        ENGINE_NAME_ACOUSTID,
+        ENGINE_NAME_AUDIOTAG,
+    )
+
+    # 3. AudioTag quota exhausted
+    mock_multi = MagicMock(spec=MultiEngineMatcherService)
+    mock_adapter = MagicMock()
+    mock_adapter.engine_name = ENGINE_NAME_AUDIOTAG
+    mock_adapter.quota_exhausted = True
+    mock_multi.cloud_adapters = (mock_adapter,)
+    view._multi_matcher = mock_multi
+    view.refresh_credential_status()
+
+    assert view._cb_engine_audiotag.isEnabled() is False
+    assert view._cb_engine_audiotag.isChecked() is False
+    assert view._badge_audiotag.text() == "Quota Exhausted"
+
+
+def test_scanner_view_start_scan_guards(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify start_scan validation rules for candidates, engines, and target databases."""
+    from unittest.mock import AsyncMock
+    from src.core.matcher.multi_matcher import MultiEngineCandidateResult
+
+    (
+        cand_repo,
+        cat_repo,
+        _,
+        reconciler,
+        settings_repo,
+    ) = _create_mock_repos(tmp_path)
+
+    mock_matcher_service = MagicMock(spec=MultiEngineMatcherService)
+    dummy_res = MultiEngineCandidateResult(
+        candidate_path=tmp_path / "song.mp3",
+        candidate_id=1,
+        matches=(),
+        engines_queried=(ENGINE_NAME_SHAZAM,),
+        elapsed_seconds=0.1,
+    )
+    mock_matcher_service.match_candidate = AsyncMock(return_value=dummy_res)
+
+    cand = ScanCandidateRecord(
+        id=1,
+        file_path=tmp_path / "song.mp3",
+        file_name="song.mp3",
+        relative_path="song.mp3",
+        file_size_bytes=1000,
+        status=ScanCandidateStatus.PENDING,
+    )
+    cand_repo.list_candidates.return_value = [cand]
+    cat_repo.list_entries.return_value = []
+
+    logs = []
+    view = ScannerView(
+        candidate_repo=cand_repo,
+        catalog_repo=cat_repo,
+        matcher_service=mock_matcher_service,
+        reconciler=reconciler,
+        settings_repo=settings_repo,
+    )
+    view.log_requested.connect(logs.append)
+
+    # 1. No candidates selected
+    view._cand_table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
+    view.start_scan()
+    assert any("No candidate audio tracks selected" in m for m in logs)
+    assert view._worker_thread is None
+
+    # Check the candidate
+    view._cand_table.item(0, 0).setCheckState(Qt.CheckState.Checked)
+
+    # 2. Local engine enabled but no databases selected
+    logs.clear()
+    view.start_scan()
+    assert any(
+        "At least one target .pklz database must be selected" in m for m in logs)
+    assert view._worker_thread is None
+
+    # 3. Disable local engine -> only Shazam enabled -> scan allowed without target databases
+    logs.clear()
+    view._cb_engine_local.setChecked(False)
+    view.start_scan()
+    assert not any("database must be selected" in m for m in logs)
+    assert view._worker_thread is not None
+
+    # Spin event loop until thread completes and teardown executes
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.start(3000)
+    while view._worker_thread is not None and timer.isActive():
+        qapp.processEvents()
+    timer.stop()
+    qapp.sendPostedEvents()
+    qapp.processEvents()
+
+    assert view._worker_thread is None
+    assert view._btn_start_scan.isEnabled() is True
+
+
+def test_scanner_view_multi_engine_matches_inspector(qapp: QApplication, tmp_path: Path) -> None:
+    """Verify matches table properly displays hits from different engines."""
+    (
+        cand_repo,
+        cat_repo,
+        matcher_service,
+        reconciler,
+        settings_repo,
+    ) = _create_mock_repos(tmp_path)
+
+    cand = ScanCandidateRecord(
+        id=77,
+        file_path=tmp_path / "hit_song.mp3",
+        file_name="hit_song.mp3",
+        relative_path="hit_song.mp3",
+        file_size_bytes=2000,
+        status=ScanCandidateStatus.SCANNED,
+    )
+    cand_repo.list_candidates.return_value = [cand]
+    cat_repo.list_entries.return_value = []
+
+    cand_repo.get_matches_for_candidate.return_value = [
+        ScanMatchRecord(
+            id=1,
+            candidate_id=77,
+            engine=ENGINE_NAME_SHAZAM,
+            matched_track="Darude - Sandstorm",
+            matched_database="Shazam Catalog",
+            confidence=0.99,
+            offset_seconds=2.5,
+            details_json='{"isrc": "FI123456"}',
+        ),
+        ScanMatchRecord(
+            id=2,
+            candidate_id=77,
+            engine=ENGINE_NAME_ACOUSTID,
+            matched_track="Sandstorm (Radio Edit)",
+            matched_database="MusicBrainz",
+            confidence=0.88,
+            offset_seconds=0.0,
+            details_json='{"score": 0.88}',
+        ),
+    ]
+
+    view = ScannerView(
+        candidate_repo=cand_repo,
+        catalog_repo=cat_repo,
+        matcher_service=matcher_service,
+        reconciler=reconciler,
+        settings_repo=settings_repo,
+    )
+
+    view._cand_table.selectRow(0)
+    assert view._matches_table.rowCount() == 2
+
+    # Row 0: Shazam
+    assert view._matches_table.item(0, 0).text() == "SHAZAM"
+    assert view._matches_table.item(0, 1).text() == "Darude - Sandstorm"
+    assert view._matches_table.item(0, 2).text() == "Shazam Catalog"
+    assert view._matches_table.item(0, 3).text() == '{"isrc": "FI123456"}'
+    assert view._matches_table.item(0, 4).text() == "2.50"
+    assert "99.0%" in view._matches_table.item(0, 5).text()
+
+    # Row 1: AcoustID
+    assert view._matches_table.item(1, 0).text() == "ACOUSTID"
+    assert view._matches_table.item(1, 1).text() == "Sandstorm (Radio Edit)"
+    assert view._matches_table.item(1, 2).text() == "MusicBrainz"
+    assert view._matches_table.item(1, 3).text() == '{"score": 0.88}'
+    assert view._matches_table.item(1, 4).text() == "0.00"
+    assert "88.0%" in view._matches_table.item(1, 5).text()
