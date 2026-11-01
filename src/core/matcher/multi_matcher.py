@@ -83,6 +83,7 @@ class MultiEngineMatcherService:
         cancel_token: threading.Event | None = None,
         on_engine_finished: Callable[[
             str, Sequence[ScanMatchRecord]], None] | None = None,
+        on_engine_error: Callable[[str, str], None] | None = None,
     ) -> MultiEngineCandidateResult:
         """Execute sequential identification cascade for a single audio candidate."""
         if cancel_token and cancel_token.is_set():
@@ -162,6 +163,8 @@ class MultiEngineMatcherService:
             except RecognitionQuotaExhaustedError as exc:
                 logger.warning("Quota exhausted for %s: %s", engine_name, exc)
                 cloud_hits = ()
+                if on_engine_error is not None:
+                    on_engine_error(engine_name, str(exc))
             except RecognitionEngineError as exc:
                 logger.warning(
                     "Recognition engine %s failed for %s: %s",
@@ -170,6 +173,8 @@ class MultiEngineMatcherService:
                     exc,
                 )
                 cloud_hits = ()
+                if on_engine_error is not None:
+                    on_engine_error(engine_name, str(exc))
 
             # Persist cloud match records
             engine_matches: list[ScanMatchRecord] = []

@@ -81,7 +81,7 @@ def test_acoustid_adapter_positive_match(dummy_audio_file: Path) -> None:
                 }
             ],
         }
-        mock_http.get = AsyncMock(return_value=mock_resp)
+        mock_http.post = AsyncMock(return_value=mock_resp)
 
         adapter = AcoustIDAdapter(
             api_key="test_api_key",
@@ -128,7 +128,7 @@ def test_acoustid_adapter_filters_low_score_and_blacklisted(dummy_audio_file: Pa
                 {"id": "55667788", "score": 0.40},  # Below 0.60 threshold
             ],
         }
-        mock_http.get = AsyncMock(return_value=mock_resp)
+        mock_http.post = AsyncMock(return_value=mock_resp)
 
         adapter = AcoustIDAdapter(
             api_key="test_key",
@@ -193,7 +193,7 @@ def test_acoustid_adapter_api_error_response(dummy_audio_file: Path) -> None:
             "status": "error",
             "error": {"message": "invalid API key"},
         }
-        mock_http.get = AsyncMock(return_value=mock_resp)
+        mock_http.post = AsyncMock(return_value=mock_resp)
 
         adapter = AcoustIDAdapter(
             api_key="bad_key",

@@ -139,11 +139,17 @@ class MatcherWorker(QObject):
                         f"[MATCH - {engine_name.upper()}] '{candidate.file_name}' -> '{track_display}' ({info_text})"
                     )
 
+            def _on_engine_error(engine_name: str, error_msg: str) -> None:
+                self.log_emitted.emit(
+                    f"[ERROR - {engine_name.upper()}] '{candidate.file_name}': {error_msg}"
+                )
+
             res = await self._service.match_candidate(
                 candidate=candidate,
                 options=self._options,
                 cancel_token=self._cancel_event,
                 on_engine_finished=_on_engine_finished,
+                on_engine_error=_on_engine_error,
             )
             all_results.append(res)
             self.progress_updated.emit(idx + 1, total, candidate.file_name)

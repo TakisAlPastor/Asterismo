@@ -139,12 +139,12 @@ class AcoustIDAdapter:
         try:
             self._last_request_time = time.monotonic()
             if self._http_client is not None:
-                resp = await self._http_client.get(ACOUSTID_LOOKUP_ENDPOINT, params=params)
+                resp = await self._http_client.post(ACOUSTID_LOOKUP_ENDPOINT, data=params)
                 resp.raise_for_status()
                 payload = resp.json()
             else:
                 async with httpx.AsyncClient(timeout=DEFAULT_HTTP_TIMEOUT_SEC) as client:
-                    resp = await client.get(ACOUSTID_LOOKUP_ENDPOINT, params=params)
+                    resp = await client.post(ACOUSTID_LOOKUP_ENDPOINT, data=params)
                     resp.raise_for_status()
                     payload = resp.json()
         except Exception as exc:
@@ -156,6 +156,11 @@ class AcoustIDAdapter:
         if payload.get("status") != "ok":
             error_data = payload.get("error", {})
             error_msg = error_data.get("message", "Unknown API error")
+            if "invalid API key" in error_msg.lower():
+                error_msg = (
+                    "Invalid AcoustID API key. AcoustID requires an Application (Client) Key "
+                    "registered at https://acoustid.org/my-applications (not a personal User Key)."
+                )
             raise RecognitionEngineError(f"AcoustID API error: {error_msg}")
 
         results_data = payload.get("results", [])

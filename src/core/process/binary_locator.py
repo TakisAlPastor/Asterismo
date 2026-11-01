@@ -46,6 +46,14 @@ class BinaryLocator:
                 if candidate.is_file() and os.access(candidate, os.X_OK):
                     return candidate.resolve()
 
+        # Fallback to local workspace bin directory if present
+        fallback_bin = Path("bin").resolve()
+        if fallback_bin.is_dir() and fallback_bin != self._bin_dir:
+            for name in names_to_try:
+                candidate = fallback_bin / name
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return candidate.resolve()
+
         # 2. Check system PATH
         for name in names_to_try:
             found_str = shutil.which(name)

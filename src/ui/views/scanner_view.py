@@ -454,14 +454,27 @@ class ScannerView(QWidget):
         if isinstance(self._matcher_service, MultiEngineMatcherService):
             return self._matcher_service
 
+        settings = self._settings_repo.load() if self._settings_repo else None
+        bin_dir = settings.paths.bin_dir if settings else None
+        from src.core.process.binary_locator import BinaryLocator
+        locator = BinaryLocator(bin_dir)
+
         secrets = self._secrets_store.load() if self._secrets_store else None
         cloud_adapters: list[RecognitionEngine] = [ShazamAdapter()]
         if secrets and secrets.acoustid_api_key and secrets.acoustid_api_key.strip():
-            cloud_adapters.append(AcoustIDAdapter(
-                api_key=secrets.acoustid_api_key.strip()))
+            cloud_adapters.append(
+                AcoustIDAdapter(
+                    api_key=secrets.acoustid_api_key.strip(),
+                    locator=locator,
+                )
+            )
         if secrets and secrets.audiotag_api_key and secrets.audiotag_api_key.strip():
-            cloud_adapters.append(AudioTagAdapter(
-                api_key=secrets.audiotag_api_key.strip()))
+            cloud_adapters.append(
+                AudioTagAdapter(
+                    api_key=secrets.audiotag_api_key.strip(),
+                    locator=locator,
+                )
+            )
 
         local_matcher = (
             self._matcher_service
