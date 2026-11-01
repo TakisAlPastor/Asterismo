@@ -12,6 +12,10 @@ from src.core.matcher.local_matcher import (
     LocalMatcherError,
     LocalMatcherService,
 )
+from src.core.matcher.multi_matcher import (
+    MultiEngineCandidateResult,
+    MultiEngineMatcherService,
+)
 
 __all__ = [
     "CandidateReconciler",
@@ -21,4 +25,6 @@ __all__ = [
     "LocalMatcherCancelledError",
     "LocalMatcherError",
     "LocalMatcherService",
+    "MultiEngineCandidateResult",
+    "MultiEngineMatcherService",
 ]
