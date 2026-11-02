@@ -20,6 +20,7 @@ from src.core.config.constants import (
     AUDIOTAG_ENDPOINT,
     AUDIOTAG_LOOP_TARGET_SECONDS,
     AUDIOTAG_MAX_POLL_ATTEMPTS,
+    AUDIOTAG_MAX_UPLOAD_DURATION_SECONDS,
     AUDIOTAG_MIN_DURATION_SECONDS,
     AUDIOTAG_POLL_INTERVAL_SECONDS,
     AUDIOTAG_STATUS_FOUND,
@@ -53,6 +54,7 @@ class AudioTagAdapter:
         http_client: httpx.AsyncClient | None = None,
         min_duration: float = AUDIOTAG_MIN_DURATION_SECONDS,
         loop_target: float = AUDIOTAG_LOOP_TARGET_SECONDS,
+        max_upload_duration: float = AUDIOTAG_MAX_UPLOAD_DURATION_SECONDS,
         poll_interval: float = AUDIOTAG_POLL_INTERVAL_SECONDS,
         max_poll_attempts: int = AUDIOTAG_MAX_POLL_ATTEMPTS,
         cooldown_min: float = AUDIOTAG_COOLDOWN_MIN_SECONDS,
@@ -64,6 +66,7 @@ class AudioTagAdapter:
         self._http_client = http_client
         self._min_duration = min_duration
         self._loop_target = loop_target
+        self._max_upload_duration = max_upload_duration
         self._poll_interval = poll_interval
         self._max_poll_attempts = max_poll_attempts
         self._cooldown_min = cooldown_min
@@ -154,6 +157,37 @@ class AudioTagAdapter:
             return output_path
         return audio_path
 
+    def _trim_clip(self, audio_path: Path) -> Path:
+        """Trim audio file down to max allowed upload duration for AudioTag API."""
+        ffmpeg_path = self._locator.locate(BIN_NAME_FFMPEG)
+        if not ffmpeg_path:
+            logger.warning("ffmpeg not found, skipping clip trimming.")
+            return audio_path
+
+        temp_dir = Path(tempfile.gettempdir())
+        output_path = temp_dir / f"audiotag_trim_{uuid.uuid4().hex[:8]}.mp3"
+
+        cmd = [
+            str(ffmpeg_path),
+            "-i",
+            str(audio_path),
+            "-t",
+            str(self._max_upload_duration),
+            "-c:a",
+            "libmp3lame",
+            "-q:a",
+            "2",
+            "-ar",
+            "44100",
+            "-y",
+            str(output_path),
+        ]
+
+        res = self._runner.run(cmd, timeout=20.0)
+        if res.is_success and output_path.is_file():
+            return output_path
+        return audio_path
+
     def _classify_error_and_raise(self, error_text: str) -> None:
         """Check error text and trip circuit breaker if credit is exhausted."""
         normalized = error_text.lower()
@@ -188,20 +222,46 @@ class AudioTagAdapter:
             resp.raise_for_status()
             return resp.json()
 
-    def _parse_track_hit(self, match_data: dict[str, Any]) -> CloudMatchResult:
-        """Parse matched track payload into normalized CloudMatchResult."""
-        title = str(match_data.get("title", "")).strip() or "Unknown Title"
-        artist = str(match_data.get("artist", "")).strip() or "Unknown Artist"
-        confidence_val = float(match_data.get("confidence", 100)) / 100.0
+    def _parse_track_hit(self, match_data: Any, score: float = 1.0) -> CloudMatchResult:
+        """Parse matched track payload (list/tuple or dict) into normalized CloudMatchResult."""
+        if isinstance(match_data, (list, tuple)):
+            title = str(match_data[0]).strip() if len(match_data) > 0 else "Unknown Title"
+            artist = str(match_data[1]).strip() if len(match_data) > 1 else "Unknown Artist"
+            album = str(match_data[2]).strip() if len(match_data) > 2 else ""
+            year = str(match_data[3]).strip() if len(match_data) > 3 else ""
+        elif isinstance(match_data, dict):
+            title = str(match_data.get("title", "")).strip() or "Unknown Title"
+            artist = str(match_data.get("artist", "")).strip() or "Unknown Artist"
+            album = str(match_data.get("album", "")).strip()
+            year = str(match_data.get("year", "")).strip()
+        else:
+            title = str(match_data).strip()
+            artist = "Unknown Artist"
+            album = ""
+            year = ""
+
+        matched_track = f"{artist} - {title}" if artist and artist != "Unknown Artist" else title
+        details = {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "year": year,
+            "raw": match_data,
+        }
+        if isinstance(match_data, dict) and "confidence" in match_data:
+            confidence_val = float(match_data.get("confidence", 100)) / 100.0
+        elif score is not None:
+            confidence_val = score if score <= 1.0 else (score / 100.0)
+        else:
+            confidence_val = 1.0
         confidence = min(1.0, max(0.0, confidence_val))
-        matched_track = f"{artist} - {title}"
 
         return CloudMatchResult(
             engine=ENGINE_NAME_AUDIOTAG,
             matched_track=matched_track,
             matched_database="AudioTag",
             confidence=confidence,
-            details_json=json.dumps(match_data),
+            details_json=json.dumps(details),
         )
 
     async def identify(
@@ -209,7 +269,7 @@ class AudioTagAdapter:
         audio_path: Path,
         cancel_token: threading.Event | None = None,
     ) -> Sequence[CloudMatchResult]:
-        """Perform two-phase AudioTag identification with polling and loop extension."""
+        """Perform two-phase AudioTag identification with polling, trimming, and loop extension."""
         if cancel_token and cancel_token.is_set():
             raise RecognitionEngineCancelledError(
                 "AudioTag identification cancelled before start.")
@@ -225,14 +285,21 @@ class AudioTagAdapter:
             raise RecognitionEngineError(
                 f"Audio file does not exist: {audio_path}")
 
-        # Check duration and extend if clip is too short
-        extended_file: Path | None = None
+        temp_files_to_clean: list[Path] = []
         target_path = audio_path
         try:
             duration = self._probe_duration(audio_path)
-            if duration is not None and duration < self._min_duration:
-                extended_file = self._loop_extend_clip(audio_path)
-                target_path = extended_file
+            if duration is not None:
+                if duration < self._min_duration:
+                    extended_file = self._loop_extend_clip(audio_path)
+                    if extended_file != audio_path:
+                        temp_files_to_clean.append(extended_file)
+                        target_path = extended_file
+                elif duration > self._max_upload_duration:
+                    trimmed_file = self._trim_clip(audio_path)
+                    if trimmed_file != audio_path:
+                        temp_files_to_clean.append(trimmed_file)
+                        target_path = trimmed_file
 
             # Randomized cooldown pacing before querying
             if self._cooldown_max > 0:
@@ -250,7 +317,7 @@ class AudioTagAdapter:
                 "action": "identify",
                 "apikey": self._api_key,
                 "start_time": "0",
-                "time_len": "180",
+                "time_len": str(int(round(self._max_upload_duration))),
             }
             files = {
                 "file": (target_path.name, file_bytes, "application/octet-stream"),
@@ -268,9 +335,12 @@ class AudioTagAdapter:
 
             job_status = initial_res.get("job_status")
             if job_status == AUDIOTAG_STATUS_FOUND:
-                tracks = initial_res.get("data", [{}])[0].get("tracks", [])
-                if tracks and isinstance(tracks[0], dict):
-                    return (self._parse_track_hit(tracks[0]),)
+                data_list = initial_res.get("data", [])
+                if data_list and isinstance(data_list[0], dict):
+                    tracks = data_list[0].get("tracks", [])
+                    if tracks:
+                        conf = float(data_list[0].get("confidence", 100)) / 100.0
+                        return (self._parse_track_hit(tracks[0], score=conf),)
                 return ()
 
             if job_status == AUDIOTAG_STATUS_NOT_FOUND:
@@ -309,10 +379,12 @@ class AudioTagAdapter:
                     poll_result = poll_res.get(
                         "result", poll_res.get("job_status"))
                     if poll_result == AUDIOTAG_STATUS_FOUND:
-                        tracks = poll_res.get("data", [{}])[
-                            0].get("tracks", [])
-                        if tracks and isinstance(tracks[0], dict):
-                            return (self._parse_track_hit(tracks[0]),)
+                        data_list = poll_res.get("data", [])
+                        if data_list and isinstance(data_list[0], dict):
+                            tracks = data_list[0].get("tracks", [])
+                            if tracks:
+                                conf = float(data_list[0].get("confidence", 100)) / 100.0
+                                return (self._parse_track_hit(tracks[0], score=conf),)
                         return ()
 
                     if poll_result == AUDIOTAG_STATUS_NOT_FOUND:
@@ -327,8 +399,9 @@ class AudioTagAdapter:
             return ()
 
         finally:
-            if extended_file and extended_file.is_file() and extended_file != audio_path:
+            for tf in temp_files_to_clean:
                 try:
-                    extended_file.unlink()
+                    if tf.is_file():
+                        tf.unlink()
                 except OSError:
                     pass

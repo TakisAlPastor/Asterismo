@@ -20,6 +20,7 @@ from typing import Mapping
 
 from src.core.config.constants import (
     AUDFPRINT_INTEGRITY_MARKERS,
+    AUDFPRINT_PROBE_TIMEOUT_SEC,
     AUDFPRINT_REQUIRED_FILES,
     BIN_NAME_FFMPEG,
     BIN_NAME_FFPROBE,
@@ -159,7 +160,7 @@ class DependencyDoctorService:
         try:
             result = self._runner.run(
                 [sys.executable, str(audfprint_py), "--version"],
-                timeout=25.0,
+                timeout=AUDFPRINT_PROBE_TIMEOUT_SEC,
             )
             # audfprint --version prints version or docopt string
             ver_text = (result.stdout or result.stderr).strip()

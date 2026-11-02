@@ -133,7 +133,7 @@ class AcoustIDAdapter:
             "format": "json",
             "duration": str(int(round(duration))),
             "fingerprint": fingerprint,
-            "meta": "recordings+releasegroups",
+            "meta": "recordings releasegroups",
         }
 
         try:
