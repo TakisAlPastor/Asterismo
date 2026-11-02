@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from pathlib import Path
 import threading
@@ -115,45 +116,54 @@ class MatcherWorker(QObject):
 
     async def _run_multi_engine_scan(self, all_results: list[object], total: int) -> None:
         """Execute asynchronous multi-engine identification scan."""
-        for idx, candidate in enumerate(self._candidates):
-            if self._cancel_event.is_set():
-                raise RecognitionEngineCancelledError(
-                    "Scan cancelled by user.")
+        try:
+            for idx, candidate in enumerate(self._candidates):
+                if self._cancel_event.is_set():
+                    raise RecognitionEngineCancelledError(
+                        "Scan cancelled by user.")
 
-            self.status_changed.emit(
-                f"Scanning ({idx + 1}/{total}): {candidate.file_name}"
-            )
-            self.progress_updated.emit(idx, total, candidate.file_name)
+                self.status_changed.emit(
+                    f"Scanning ({idx + 1}/{total}): {candidate.file_name}"
+                )
+                self.progress_updated.emit(idx, total, candidate.file_name)
 
-            def _on_engine_finished(engine_name: str, hits: Sequence[ScanMatchRecord]) -> None:
-                for m in hits:
-                    self.match_detected.emit(m)
-                    track_display = Path(
-                        m.matched_track).name or m.matched_track
-                    if m.engine == "audfprint":
-                        info_text = f"{m.aligned_hashes} hashes in {m.matched_database}"
-                    else:
-                        conf_pct = int(round(m.confidence * 100))
-                        info_text = f"{conf_pct}% confidence via {m.matched_database}"
+                def _on_engine_finished(engine_name: str, hits: Sequence[ScanMatchRecord]) -> None:
+                    for m in hits:
+                        self.match_detected.emit(m)
+                        track_display = Path(
+                            m.matched_track).name or m.matched_track
+                        if m.engine == "audfprint":
+                            info_text = f"{m.aligned_hashes} hashes in {m.matched_database}"
+                        else:
+                            conf_pct = int(round(m.confidence * 100))
+                            info_text = f"{conf_pct}% confidence via {m.matched_database}"
+                        self.log_emitted.emit(
+                            f"[MATCH - {engine_name.upper()}] '{candidate.file_name}' -> '{track_display}' ({info_text})"
+                        )
+
+                def _on_engine_error(engine_name: str, error_msg: str) -> None:
                     self.log_emitted.emit(
-                        f"[MATCH - {engine_name.upper()}] '{candidate.file_name}' -> '{track_display}' ({info_text})"
+                        f"[ERROR - {engine_name.upper()}] '{candidate.file_name}': {error_msg}"
                     )
 
-            def _on_engine_error(engine_name: str, error_msg: str) -> None:
-                self.log_emitted.emit(
-                    f"[ERROR - {engine_name.upper()}] '{candidate.file_name}': {error_msg}"
+                res = await self._service.match_candidate(
+                    candidate=candidate,
+                    options=self._options,
+                    cancel_token=self._cancel_event,
+                    on_engine_finished=_on_engine_finished,
+                    on_engine_error=_on_engine_error,
                 )
-
-            res = await self._service.match_candidate(
-                candidate=candidate,
-                options=self._options,
-                cancel_token=self._cancel_event,
-                on_engine_finished=_on_engine_finished,
-                on_engine_error=_on_engine_error,
-            )
-            all_results.append(res)
-            self.progress_updated.emit(idx + 1, total, candidate.file_name)
-            self.candidate_completed.emit(res)
+                all_results.append(res)
+                self.progress_updated.emit(idx + 1, total, candidate.file_name)
+                self.candidate_completed.emit(res)
+        finally:
+            if hasattr(self._service, "aclose"):
+                try:
+                    close_res = self._service.aclose()
+                    if inspect.isawaitable(close_res):
+                        await close_res
+                except Exception as exc:
+                    logger.warning("Error during service teardown: %s", exc)
 
     def _run_legacy_local_scan(self, all_results: list[object], total: int) -> None:
         """Fallback for purely synchronous LocalMatcherService execution."""

@@ -77,3 +77,7 @@ class RecognitionEngine(Protocol):
     ) -> Sequence[CloudMatchResult]:
         """Query engine for acoustic matches on candidate audio track."""
         ...
+
+    async def aclose(self) -> None:
+        """Release underlying network sessions, connection pools, or child resources."""
+        ...

@@ -351,3 +351,32 @@ def test_batch_match_callback_and_cancellation(
             )
 
     asyncio.run(_run())
+
+
+def test_multi_matcher_aclose_cascades() -> None:
+    """Verify aclose cascades to all registered cloud adapters and suppresses errors."""
+    async def _run() -> None:
+        mock_adapter1 = MagicMock()
+        mock_adapter1.engine_name = "shazam"
+        mock_adapter1.aclose = AsyncMock()
+
+        mock_adapter2 = MagicMock()
+        mock_adapter2.engine_name = "acoustid"
+        mock_adapter2.aclose = AsyncMock(
+            side_effect=RuntimeError("Adapter 2 fail"))
+
+        mock_adapter3 = MagicMock()
+        # Adapter without aclose method should be safely ignored
+        del mock_adapter3.aclose
+
+        service = MultiEngineMatcherService(
+            candidate_repo=MagicMock(),
+            local_matcher=None,
+            cloud_adapters=(mock_adapter1, mock_adapter2, mock_adapter3),
+        )
+
+        await service.aclose()
+        mock_adapter1.aclose.assert_awaited_once()
+        mock_adapter2.aclose.assert_awaited_once()
+
+    asyncio.run(_run())

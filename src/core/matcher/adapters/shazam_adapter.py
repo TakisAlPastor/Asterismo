@@ -116,3 +116,16 @@ class ShazamAdapter:
                 details_json=details_json,
             ),
         )
+
+    async def aclose(self) -> None:
+        """Close active network sessions and release connection pools."""
+        if self._client is not None:
+            client = self._client
+            self._client = None
+            try:
+                if hasattr(client, "close"):
+                    close_res = client.close()
+                    if asyncio.iscoroutine(close_res):
+                        await close_res
+            except Exception as exc:
+                logger.warning("Error closing Shazam client session: %s", exc)

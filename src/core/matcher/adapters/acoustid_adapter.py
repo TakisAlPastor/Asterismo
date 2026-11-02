@@ -199,3 +199,7 @@ class AcoustIDAdapter:
             )
 
         return tuple(matches)
+
+    async def aclose(self) -> None:
+        """Release underlying network sessions, connection pools, or child resources."""
+        # Ephemeral httpx clients are closed per-request in async with blocks

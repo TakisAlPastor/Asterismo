@@ -138,3 +138,37 @@ def test_shazam_adapter_client_error(dummy_audio_file: Path) -> None:
             await adapter.identify(dummy_audio_file)
 
     asyncio.run(_run())
+
+
+def test_shazam_adapter_aclose_lifecycle() -> None:
+    """Verify aclose cleanly closes underlying client and resets state to None."""
+    async def _run() -> None:
+        mock_shazam = MagicMock()
+        mock_shazam.close = AsyncMock()
+
+        adapter = ShazamAdapter(shazam_client=mock_shazam)
+        assert adapter._client is mock_shazam
+
+        await adapter.aclose()
+        mock_shazam.close.assert_awaited_once()
+        assert adapter._client is None
+
+        # Idempotency check: second close call should be a no-op
+        await adapter.aclose()
+        assert mock_shazam.close.await_count == 1
+
+    asyncio.run(_run())
+
+
+def test_shazam_adapter_aclose_handles_exception() -> None:
+    """Verify aclose suppresses client teardown errors and ensures client state reset."""
+    async def _run() -> None:
+        mock_shazam = MagicMock()
+        mock_shazam.close = AsyncMock(
+            side_effect=RuntimeError("Teardown failed"))
+
+        adapter = ShazamAdapter(shazam_client=mock_shazam)
+        await adapter.aclose()
+        assert adapter._client is None
+
+    asyncio.run(_run())

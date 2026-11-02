@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 import logging
 from pathlib import Path
 import threading
@@ -258,3 +259,18 @@ class MultiEngineMatcherService:
                 progress_callback(idx + 1, total, candidate, cand_result)
 
         return results
+
+    async def aclose(self) -> None:
+        """Close all registered cloud adapters and release network connection pools."""
+        for adapter in self._cloud_adapters:
+            if hasattr(adapter, "aclose"):
+                try:
+                    res = adapter.aclose()
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception as exc:
+                    logger.warning(
+                        "Error during teardown for engine adapter %s: %s",
+                        getattr(adapter, "engine_name", adapter),
+                        exc,
+                    )

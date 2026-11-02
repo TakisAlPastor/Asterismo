@@ -41,6 +41,9 @@ class MockCompliantEngine:
             ),
         )
 
+    async def aclose(self) -> None:
+        pass
+
 
 class MockNonCompliantEngine:
     """Class missing required protocol members."""

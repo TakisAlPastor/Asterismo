@@ -225,13 +225,16 @@ class AudioTagAdapter:
     def _parse_track_hit(self, match_data: Any, score: float = 1.0) -> CloudMatchResult:
         """Parse matched track payload (list/tuple or dict) into normalized CloudMatchResult."""
         if isinstance(match_data, (list, tuple)):
-            title = str(match_data[0]).strip() if len(match_data) > 0 else "Unknown Title"
-            artist = str(match_data[1]).strip() if len(match_data) > 1 else "Unknown Artist"
+            title = str(match_data[0]).strip() if len(
+                match_data) > 0 else "Unknown Title"
+            artist = str(match_data[1]).strip() if len(
+                match_data) > 1 else "Unknown Artist"
             album = str(match_data[2]).strip() if len(match_data) > 2 else ""
             year = str(match_data[3]).strip() if len(match_data) > 3 else ""
         elif isinstance(match_data, dict):
             title = str(match_data.get("title", "")).strip() or "Unknown Title"
-            artist = str(match_data.get("artist", "")).strip() or "Unknown Artist"
+            artist = str(match_data.get("artist", "")
+                         ).strip() or "Unknown Artist"
             album = str(match_data.get("album", "")).strip()
             year = str(match_data.get("year", "")).strip()
         else:
@@ -339,7 +342,8 @@ class AudioTagAdapter:
                 if data_list and isinstance(data_list[0], dict):
                     tracks = data_list[0].get("tracks", [])
                     if tracks:
-                        conf = float(data_list[0].get("confidence", 100)) / 100.0
+                        conf = float(data_list[0].get(
+                            "confidence", 100)) / 100.0
                         return (self._parse_track_hit(tracks[0], score=conf),)
                 return ()
 
@@ -383,7 +387,8 @@ class AudioTagAdapter:
                         if data_list and isinstance(data_list[0], dict):
                             tracks = data_list[0].get("tracks", [])
                             if tracks:
-                                conf = float(data_list[0].get("confidence", 100)) / 100.0
+                                conf = float(data_list[0].get(
+                                    "confidence", 100)) / 100.0
                                 return (self._parse_track_hit(tracks[0], score=conf),)
                         return ()
 
@@ -405,3 +410,7 @@ class AudioTagAdapter:
                         tf.unlink()
                 except OSError:
                     pass
+
+    async def aclose(self) -> None:
+        """Release underlying network sessions, connection pools, or child resources."""
+        # Ephemeral httpx clients are closed per-request in async with blocks

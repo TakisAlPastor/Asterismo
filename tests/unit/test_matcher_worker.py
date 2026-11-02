@@ -201,3 +201,37 @@ def test_matcher_worker_legacy_fallback(qapp: QApplication, sample_candidate: Sc
     assert len(match_events) == 1
     assert match_events[0].aligned_hashes == 42
     assert len(completed_events) == 1
+
+
+def test_matcher_worker_teardown_invoked(qapp: QApplication, sample_candidate: ScanCandidateRecord) -> None:
+    """Verify MatcherWorker invokes aclose on service on completion, cancellation, and error."""
+    # 1. Success case
+    mock_service = MagicMock(spec=MultiEngineMatcherService)
+    mock_service.match_candidate = AsyncMock(return_value=MultiEngineCandidateResult(
+        candidate_path=sample_candidate.file_path,
+        candidate_id=1,
+        matches=(),
+        engines_queried=(ENGINE_NAME_SHAZAM,),
+        elapsed_seconds=0.1,
+    ))
+    mock_service.aclose = AsyncMock()
+
+    worker = MatcherWorker(matcher_service=mock_service, candidates=[sample_candidate])
+    worker.run()
+    mock_service.aclose.assert_awaited_once()
+
+    # 2. Cancellation case
+    mock_service_cancel = MagicMock(spec=MultiEngineMatcherService)
+    mock_service_cancel.aclose = AsyncMock()
+    worker_cancel = MatcherWorker(matcher_service=mock_service_cancel, candidates=[sample_candidate])
+    worker_cancel.cancel()
+    worker_cancel.run()
+    mock_service_cancel.aclose.assert_awaited_once()
+
+    # 3. Error case
+    mock_service_err = MagicMock(spec=MultiEngineMatcherService)
+    mock_service_err.match_candidate = AsyncMock(side_effect=RuntimeError("Fatal scan failure"))
+    mock_service_err.aclose = AsyncMock()
+    worker_err = MatcherWorker(matcher_service=mock_service_err, candidates=[sample_candidate])
+    worker_err.run()
+    mock_service_err.aclose.assert_awaited_once()
